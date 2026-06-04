@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SnowLens — Analyze</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d0d0d;
+      --surface: #141414;
+      --border: #1e1e1e;
+      --border-lit: #2a2a2a;
+      --text: #ffffff;
+      --text-muted: #888888;
+      --text-dim: #333333;
+      --cyan: #00e5c0;
+      --cyan-dim: rgba(0, 229, 192, 0.07);
+      --cyan-border: rgba(0, 229, 192, 0.2);
+      --coral: #ff5533;
+      --coral-dim: rgba(255, 85, 51, 0.08);
+      --coral-border: rgba(255, 85, 51, 0.25);
+      --display: 'Barlow Condensed', sans-serif;
+      --body: 'Barlow', sans-serif;
+    }
+
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--body);
+      min-height: 100vh;
+    }
+
+    .page {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 40px 24px 96px;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 52px;
+    }
+
+    .logo {
+      font-family: var(--display);
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .logo-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--cyan);
+      display: inline-block;
+    }
+
+    .logo em { color: var(--cyan); font-style: normal; }
+
+    .badge {
+      font-family: var(--display);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--coral);
+      border: 1px solid var(--coral-border);
+      padding: 4px 12px;
+      background: var(--coral-dim);
+    }
+
+    /* ── Title ── */
+    .title-block { margin-bottom: 36px; }
+
+    .title-block h1 {
+      font-family: var(--display);
+      font-size: 42px;
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -0.01em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .title-block h1 em {
+      color: var(--cyan);
+      font-style: normal;
+      text-decoration: underline;
+      text-decoration-color: var(--cyan);
+      text-underline-offset: 4px;
+    }
+
+    .title-block p {
+      font-size: 15px;
+      color: var(--text-muted);
+      line-height: 1.65;
+      max-width: 520px;
+    }
+
+    /* ── Sport toggle ── */
+    .sport-toggle {
+      display: flex;
+      gap: 0;
+      margin-bottom: 20px;
+      border: 1px solid var(--border-lit);
+      display: inline-flex;
+    }
+
+    .sport-btn {
+      font-family: var(--display);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 9px 22px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .sport-btn + .sport-btn { border-left: 1px solid var(--border-lit); }
+
+    .sport-btn.active {
+      background: var(--cyan);
+      color: #0d0d0d;
+    }
+
+    .sport-btn:hover:not(.active) { color: var(--text); background: var(--surface); }
+
+    /* ── Upload zone ── */
+    .upload-zone {
+      border: 1px solid var(--border-lit);
+      background: var(--surface);
+      padding: 52px 32px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+      margin-bottom: 16px;
+    }
+
+    .upload-zone:hover,
+    .upload-zone.drag-over {
+      border-color: var(--cyan-border);
+      background: var(--cyan-dim);
+    }
+
+    .upload-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .upload-icon {
+      width: 36px;
+      height: 36px;
+      margin: 0 auto 14px;
+      color: var(--cyan);
+      opacity: 0.5;
+    }
+
+    .upload-zone h2 {
+      font-family: var(--display);
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .upload-zone p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .file-selected {
+      margin-top: 14px;
+      font-size: 13px;
+      color: var(--cyan);
+      font-weight: 500;
+    }
+
+    /* ── Requirements ── */
+    .requirements {
+      border-left: 2px solid var(--border-lit);
+      padding: 10px 16px;
+      margin-bottom: 28px;
+    }
+
+    .requirements p {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.7;
+    }
+
+    .requirements p strong { color: var(--text); font-weight: 500; }
+
+    /* ── Submit ── */
+    .submit-btn {
+      width: 100%;
+      padding: 16px;
+      background: var(--cyan);
+      color: #0d0d0d;
+      border: none;
+      font-family: var(--display);
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .submit-btn:hover { opacity: 0.88; }
+    .submit-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+
+    /* ── States ── */
+    #state-idle { display: block; }
+    #state-processing, #state-result, #state-error { display: none; }
+
+    /* ── Processing ── */
+    .processing-block {
+      padding: 80px 0;
+      text-align: center;
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 2px solid var(--border-lit);
+      border-top-color: var(--cyan);
+      border-radius: 50%;
+      margin: 0 auto 24px;
+      animation: spin 0.85s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .processing-block h2 {
+      font-family: var(--display);
+      font-size: 22px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .processing-block p { font-size: 14px; color: var(--text-muted); }
+
+    .processing-step {
+      margin-top: 28px;
+      font-size: 12px;
+      color: var(--text-dim);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-family: var(--display);
+      min-height: 18px;
+    }
+
+    /* ── Result ── */
+    .result-block { animation: fadeUp 0.35s ease; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+    .result-eyebrow {
+      font-family: var(--display);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--coral);
+      margin-bottom: 14px;
+    }
+
+    .coaching-card {
+      background: var(--surface);
+      border: 1px solid var(--border-lit);
+      border-left: 3px solid var(--cyan);
+      padding: 28px 32px;
+      margin-bottom: 20px;
+    }
+
+    .coaching-card p {
+      font-size: 17px;
+      line-height: 1.75;
+      color: var(--text);
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 36px;
+    }
+
+    .meta-pill {
+      font-family: var(--display);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      background: var(--surface);
+      border: 1px solid var(--border-lit);
+      padding: 5px 14px;
+    }
+
+    .meta-pill span { color: var(--cyan); }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 32px 0;
+    }
+
+    .again-btn {
+      font-family: var(--display);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 10px 20px;
+      background: transparent;
+      border: 1px solid var(--border-lit);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .again-btn:hover { border-color: var(--cyan-border); color: var(--cyan); }
+
+    /* ── Error ── */
+    .error-card {
+      background: var(--coral-dim);
+      border: 1px solid var(--coral-border);
+      padding: 22px 26px;
+      margin-bottom: 24px;
+    }
+
+    .error-card h3 {
+      font-family: var(--display);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--coral);
+      margin-bottom: 8px;
+    }
+
+    .error-card p { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
+
+    /* ── Footer ── */
+    .footer-note {
+      margin-top: 56px;
+      font-size: 12px;
+      color: var(--text-dim);
+      text-align: center;
+      line-height: 1.8;
+    }
+
+    .footer-note a { color: var(--text-muted); text-decoration: none; }
+    .footer-note a:hover { color: var(--cyan); }
+  </style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="header">
+    <a href="/" class="logo">
+      <span class="logo-dot"></span>
+      Snow <em>Lens</em>
+    </a>
+    <div class="badge">Early Test Build</div>
+  </header>
+
+  <!-- IDLE -->
+  <div id="state-idle">
+    <div class="title-block">
+      <h1>Analyze<br>your <em>clip</em></h1>
+      <p>Upload a follow-cam video. SnowLens runs pose detection and returns coaching feedback on your body position. This is a test pipeline — not the final product.</p>
+    </div>
+
+    <div class="sport-toggle">
+      <button class="sport-btn active" onclick="setSport('ski', this)">Ski</button>
+      <button class="sport-btn" onclick="setSport('snowboard', this)">Snowboard</button>
+    </div>
+
+    <div class="upload-zone" id="upload-zone">
+      <input type="file" id="video-input" accept="video/*" onchange="onFileSelected(this)">
+      <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+      </svg>
+      <h2>Drop your clip here</h2>
+      <p>MP4 or MOV · follow-cam only · max 500MB</p>
+      <div class="file-selected" id="file-name-display"></div>
+    </div>
+
+    <div class="requirements">
+      <p><strong>Requirements:</strong> Camera behind the rider · clip ≥ 4 seconds · rider visible throughout · at least 2 turns</p>
+    </div>
+
+    <button class="submit-btn" id="submit-btn" onclick="submitVideo()" disabled>
+      Analyze clip →
+    </button>
+  </div>
+
+  <!-- PROCESSING -->
+  <div id="state-processing">
+    <div class="processing-block">
+      <div class="spinner"></div>
+      <h2>Analyzing your clip</h2>
+      <p>Running pose detection and generating coaching feedback.</p>
+      <div class="processing-step" id="processing-step">Initializing...</div>
+    </div>
+  </div>
+
+  <!-- RESULT -->
+  <div id="state-result">
+    <div class="result-block">
+      <div class="result-eyebrow">What actually happened</div>
+      <div class="coaching-card">
+        <p id="coaching-text"></p>
+      </div>
+      <div class="meta-row" id="meta-row"></div>
+      <hr class="divider">
+      <button class="again-btn" onclick="resetPage()">← Analyze another clip</button>
+    </div>
+  </div>
+
+  <!-- ERROR -->
+  <div id="state-error">
+    <div class="error-card">
+      <h3>Clip rejected</h3>
+      <p id="error-text"></p>
+    </div>
+    <button class="again-btn" onclick="resetPage()">← Try another clip</button>
+  </div>
+
+  <div class="footer-note">
+    SnowLens internal test build · not for public distribution<br>
+    <a href="/">← Back to main site</a>
+  </div>
+
+</div>
+
+<script>
+  const MODAL_URL = 'https://d3lynch26-stack--snowlens-v2-analyze-cors.modal.run';
+
+  let selectedFile = null;
+  let selectedSport = 'ski';
+
+  function setSport(sport, btn) {
+    selectedSport = sport;
+    document.querySelectorAll('.sport-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+
+  function onFileSelected(input) {
+    if (input.files && input.files[0]) {
+      selectedFile = input.files[0];
+      document.getElementById('file-name-display').textContent = selectedFile.name;
+      document.getElementById('submit-btn').disabled = false;
+    }
+  }
+
+  const zone = document.getElementById('upload-zone');
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('video/')) {
+      selectedFile = file;
+      document.getElementById('file-name-display').textContent = file.name;
+      document.getElementById('submit-btn').disabled = false;
+    }
+  });
+
+  function setState(name) {
+    ['idle','processing','result','error'].forEach(s => {
+      document.getElementById(`state-${s}`).style.display = s === name ? 'block' : 'none';
+    });
+  }
+
+  const steps = [
+    'Uploading clip...',
+    'Running pose detection...',
+    'Computing separation angle...',
+    'Generating coaching feedback...',
+    'Almost done...',
+  ];
+
+  function cycleSteps() {
+    let i = 0;
+    const el = document.getElementById('processing-step');
+    el.textContent = steps[0];
+    return setInterval(() => {
+      i = Math.min(i + 1, steps.length - 1);
+      el.textContent = steps[i];
+    }, 8000);
+  }
+
+  async function submitVideo() {
+    if (!selectedFile) return;
+    setState('processing');
+    const timer = cycleSteps();
+    try {
+      const fd = new FormData();
+      fd.append('video', selectedFile);
+      fd.append('sport', selectedSport);
+      const res = await fetch(MODAL_URL, { method: 'POST', body: fd });
+      clearInterval(timer);
+      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      const data = await res.json();
+      if (data.status === 'rejected') {
+        document.getElementById('error-text').textContent =
+          data.reasons ? data.reasons.join(' ') : 'Clip did not pass quality gate.';
+        setState('error');
+        return;
+      }
+      document.getElementById('coaching-text').textContent = data.coaching || 'Analysis complete.';
+      const row = document.getElementById('meta-row');
+      row.innerHTML = '';
+      if (data.separation_angle != null)
+        row.innerHTML += `<div class="meta-pill">Separation <span>${data.separation_angle}°</span></div>`;
+      row.innerHTML += `<div class="meta-pill">Sport <span>${data.sport}</span></div>`;
+      if (data.prior_session)
+        row.innerHTML += `<div class="meta-pill">vs ${data.prior_session.date} <span>${data.prior_session.separation_angle}°</span></div>`;
+      setState('result');
+    } catch (err) {
+      clearInterval(timer);
+      document.getElementById('error-text').textContent = err.message || 'Something went wrong.';
+      setState('error');
+    }
+  }
+
+  function resetPage() {
+    selectedFile = null;
+    document.getElementById('file-name-display').textContent = '';
+    document.getElementById('submit-btn').disabled = true;
+    document.getElementById('video-input').value = '';
+    setState('idle');
+  }
+</script>
+</body>
+</html>
