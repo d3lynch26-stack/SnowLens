@@ -1,0 +1,5 @@
+{
+  "routes": [
+    { "src": "/analyze", "dest": "/analyze.html" }
+  ]
+}
