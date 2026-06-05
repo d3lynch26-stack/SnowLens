@@ -40,7 +40,6 @@
       padding: 40px 24px 96px;
     }
 
-    /* ── Header ── */
     .header {
       display: flex;
       align-items: center;
@@ -61,14 +60,7 @@
       gap: 6px;
     }
 
-    .logo-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--cyan);
-      display: inline-block;
-    }
-
+    .logo-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); display: inline-block; }
     .logo em { color: var(--cyan); font-style: normal; }
 
     .badge {
@@ -83,7 +75,9 @@
       background: var(--coral-dim);
     }
 
-    /* ── Title ── */
+    /* ── Main states ── */
+    #state-idle, #state-processing, #state-result, #state-error { display: none; }
+
     .title-block { margin-bottom: 36px; }
 
     .title-block h1 {
@@ -96,54 +90,26 @@
       margin-bottom: 10px;
     }
 
-    .title-block h1 em {
-      color: var(--cyan);
-      font-style: normal;
-      text-decoration: underline;
-      text-decoration-color: var(--cyan);
-      text-underline-offset: 4px;
-    }
+    .title-block h1 em { color: var(--cyan); font-style: normal; text-decoration: underline; text-decoration-color: var(--cyan); text-underline-offset: 4px; }
+    .title-block p { font-size: 15px; color: var(--text-muted); line-height: 1.65; max-width: 520px; }
 
-    .title-block p {
-      font-size: 15px;
-      color: var(--text-muted);
-      line-height: 1.65;
-      max-width: 520px;
-    }
-
-    /* ── Sport toggle ── */
-    .sport-toggle {
-      display: flex;
-      gap: 0;
-      margin-bottom: 20px;
-      border: 1px solid var(--border-lit);
+    .sport-indicator {
       display: inline-flex;
-    }
-
-    .sport-btn {
+      align-items: center;
+      gap: 8px;
       font-family: var(--display);
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
       letter-spacing: 0.1em;
       text-transform: uppercase;
-      padding: 9px 22px;
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
+      color: var(--cyan);
+      margin-bottom: 24px;
       cursor: pointer;
-      transition: all 0.15s;
     }
 
-    .sport-btn + .sport-btn { border-left: 1px solid var(--border-lit); }
+    .sport-indicator:hover { opacity: 0.7; }
+    .sport-indicator span { color: var(--text-muted); }
 
-    .sport-btn.active {
-      background: var(--cyan);
-      color: #0d0d0d;
-    }
-
-    .sport-btn:hover:not(.active) { color: var(--text); background: var(--surface); }
-
-    /* ── Upload zone ── */
     .upload-zone {
       border: 1px solid var(--border-lit);
       background: var(--surface);
@@ -155,8 +121,7 @@
       margin-bottom: 16px;
     }
 
-    .upload-zone:hover,
-    .upload-zone.drag-over {
+    .upload-zone:hover, .upload-zone.drag-over {
       border-color: var(--cyan-border);
       background: var(--cyan-dim);
     }
@@ -170,13 +135,7 @@
       height: 100%;
     }
 
-    .upload-icon {
-      width: 36px;
-      height: 36px;
-      margin: 0 auto 14px;
-      color: var(--cyan);
-      opacity: 0.5;
-    }
+    .upload-icon { width: 36px; height: 36px; margin: 0 auto 14px; color: var(--cyan); opacity: 0.5; }
 
     .upload-zone h2 {
       font-family: var(--display);
@@ -188,34 +147,18 @@
       margin-bottom: 6px;
     }
 
-    .upload-zone p {
-      font-size: 13px;
-      color: var(--text-muted);
-    }
+    .upload-zone p { font-size: 13px; color: var(--text-muted); }
+    .file-selected { margin-top: 14px; font-size: 13px; color: var(--cyan); font-weight: 500; }
 
-    .file-selected {
-      margin-top: 14px;
-      font-size: 13px;
-      color: var(--cyan);
-      font-weight: 500;
-    }
-
-    /* ── Requirements ── */
     .requirements {
       border-left: 2px solid var(--border-lit);
       padding: 10px 16px;
       margin-bottom: 28px;
     }
 
-    .requirements p {
-      font-size: 13px;
-      color: var(--text-muted);
-      line-height: 1.7;
-    }
-
+    .requirements p { font-size: 13px; color: var(--text-muted); line-height: 1.7; }
     .requirements p strong { color: var(--text); font-weight: 500; }
 
-    /* ── Submit ── */
     .submit-btn {
       width: 100%;
       padding: 16px;
@@ -234,15 +177,7 @@
     .submit-btn:hover { opacity: 0.88; }
     .submit-btn:disabled { opacity: 0.25; cursor: not-allowed; }
 
-    /* ── States ── */
-    #state-idle { display: block; }
-    #state-processing, #state-result, #state-error { display: none; }
-
-    /* ── Processing ── */
-    .processing-block {
-      padding: 80px 0;
-      text-align: center;
-    }
+    .processing-block { padding: 80px 0; text-align: center; }
 
     .spinner {
       width: 36px;
@@ -266,18 +201,8 @@
     }
 
     .processing-block p { font-size: 14px; color: var(--text-muted); }
+    .processing-step { margin-top: 28px; font-size: 12px; color: var(--text-dim); letter-spacing: 0.06em; text-transform: uppercase; font-family: var(--display); min-height: 18px; }
 
-    .processing-step {
-      margin-top: 28px;
-      font-size: 12px;
-      color: var(--text-dim);
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      font-family: var(--display);
-      min-height: 18px;
-    }
-
-    /* ── Result ── */
     .result-block { animation: fadeUp 0.35s ease; }
     @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
@@ -299,18 +224,9 @@
       margin-bottom: 20px;
     }
 
-    .coaching-card p {
-      font-size: 17px;
-      line-height: 1.75;
-      color: var(--text);
-    }
+    .coaching-card p { font-size: 17px; line-height: 1.75; color: var(--text); }
 
-    .meta-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-bottom: 36px;
-    }
+    .meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 36px; }
 
     .meta-pill {
       font-family: var(--display);
@@ -326,11 +242,7 @@
 
     .meta-pill span { color: var(--cyan); }
 
-    .divider {
-      border: none;
-      border-top: 1px solid var(--border);
-      margin: 32px 0;
-    }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
 
     .again-btn {
       font-family: var(--display);
@@ -348,7 +260,6 @@
 
     .again-btn:hover { border-color: var(--cyan-border); color: var(--cyan); }
 
-    /* ── Error ── */
     .error-card {
       background: var(--coral-dim);
       border: 1px solid var(--coral-border);
@@ -368,15 +279,7 @@
 
     .error-card p { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
 
-    /* ── Footer ── */
-    .footer-note {
-      margin-top: 56px;
-      font-size: 12px;
-      color: var(--text-dim);
-      text-align: center;
-      line-height: 1.8;
-    }
-
+    .footer-note { margin-top: 56px; font-size: 12px; color: var(--text-dim); text-align: center; line-height: 1.8; }
     .footer-note a { color: var(--text-muted); text-decoration: none; }
     .footer-note a:hover { color: var(--cyan); }
   </style>
@@ -392,19 +295,14 @@
     </a>
     <div class="badge">Early Test Build</div>
   </header>
+  </div>
 
   <!-- IDLE -->
   <div id="state-idle">
     <div class="title-block">
       <h1>Analyze<br>your <em>clip</em></h1>
-      <p>Upload a follow-cam video. SnowLens runs pose detection and returns coaching feedback on your body position. This is a test pipeline — not the final product.</p>
+      <p>Upload a follow-cam video. SnowLens automatically detects your sport, runs pose detection, and returns coaching feedback on your body position.</p>
     </div>
-
-    <div class="sport-toggle">
-      <button class="sport-btn active" onclick="setSport('ski', this)">Ski</button>
-      <button class="sport-btn" onclick="setSport('snowboard', this)">Snowboard</button>
-    </div>
-
     <div class="upload-zone" id="upload-zone">
       <input type="file" id="video-input" accept="video/*" onchange="onFileSelected(this)">
       <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -465,14 +363,10 @@
 
 <script>
   const MODAL_URL = 'https://d3lynch26-stack--snowlens-v2-analyze-cors.modal.run';
-
   let selectedFile = null;
-  let selectedSport = 'ski';
 
-  function setSport(sport, btn) {
-    selectedSport = sport;
-    document.querySelectorAll('.sport-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
+  function init() {
+    setState('idle');
   }
 
   function onFileSelected(input) {
@@ -528,7 +422,6 @@
     try {
       const fd = new FormData();
       fd.append('video', selectedFile);
-      fd.append('sport', selectedSport);
       const res = await fetch(MODAL_URL, { method: 'POST', body: fd });
       clearInterval(timer);
       if (!res.ok) throw new Error(`Server error ${res.status}`);
@@ -544,7 +437,6 @@
       row.innerHTML = '';
       if (data.separation_angle != null)
         row.innerHTML += `<div class="meta-pill">Separation <span>${data.separation_angle}°</span></div>`;
-      row.innerHTML += `<div class="meta-pill">Sport <span>${data.sport}</span></div>`;
       if (data.prior_session)
         row.innerHTML += `<div class="meta-pill">vs ${data.prior_session.date} <span>${data.prior_session.separation_angle}°</span></div>`;
       setState('result');
@@ -562,6 +454,8 @@
     document.getElementById('video-input').value = '';
     setState('idle');
   }
+
+  init();
 </script>
 </body>
 </html>
