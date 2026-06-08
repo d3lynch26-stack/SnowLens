@@ -75,7 +75,6 @@
       background: var(--coral-dim);
     }
 
-    /* ── Main states ── */
     #state-idle, #state-processing, #state-result, #state-error { display: none; }
 
     .title-block { margin-bottom: 36px; }
@@ -92,23 +91,6 @@
 
     .title-block h1 em { color: var(--cyan); font-style: normal; text-decoration: underline; text-decoration-color: var(--cyan); text-underline-offset: 4px; }
     .title-block p { font-size: 15px; color: var(--text-muted); line-height: 1.65; max-width: 520px; }
-
-    .sport-indicator {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-family: var(--display);
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--cyan);
-      margin-bottom: 24px;
-      cursor: pointer;
-    }
-
-    .sport-indicator:hover { opacity: 0.7; }
-    .sport-indicator span { color: var(--text-muted); }
 
     .upload-zone {
       border: 1px solid var(--border-lit);
@@ -362,7 +344,7 @@
 </div>
 
 <script>
-  const MODAL_URL = 'https://d3lynch26-stack--snowlens-v2-https://d3lynch26-stack--snowlens-v2-fastapi-app.modal.run/analyze';
+  const MODAL_URL = 'https://d3lynch26-stack--snowlens-v2-fastapi-app.modal.run/analyze';
   let selectedFile = null;
 
   function init() {
