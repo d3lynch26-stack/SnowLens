@@ -352,6 +352,7 @@
   }
 
   function onFileSelected(input) {
+    // preview handled below
     if (input.files && input.files[0]) {
       selectedFile = input.files[0];
       document.getElementById('file-name-display').textContent = selectedFile.name;
@@ -370,6 +371,7 @@
       selectedFile = file;
       document.getElementById('file-name-display').textContent = file.name;
       document.getElementById('submit-btn').disabled = false;
+      showPreview(file);
     }
   });
 
@@ -434,6 +436,8 @@
     document.getElementById('file-name-display').textContent = '';
     document.getElementById('submit-btn').disabled = true;
     document.getElementById('video-input').value = '';
+    const p = document.getElementById('video-preview');
+    if (p) { URL.revokeObjectURL(p.src); p.remove(); }
     setState('idle');
   }
 
