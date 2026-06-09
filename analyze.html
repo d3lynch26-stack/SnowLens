@@ -60,7 +60,7 @@
       gap: 6px;
     }
 
-    .logo-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); display: inline-block; }
+    .logo-icon { width: 28px; height: 22px; color: var(--cyan); flex-shrink: 0; }
     .logo em { color: var(--cyan); font-style: normal; }
 
     .badge {
@@ -272,7 +272,20 @@
 
   <header class="header">
     <a href="/" class="logo">
-      <span class="logo-dot"></span>
+      <svg class="logo-icon" viewBox="6 12 98 76" xmlns="http://www.w3.org/2000/svg" aria-label="SnowLens">
+        <path d="M9 69 Q50 83 95 49" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M40 53 L38 64 L33 73.08" fill="none" stroke="currentColor" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M48 52 L53 63 L52 70.75" fill="none" stroke="currentColor" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M40 53 L48 52" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M44 34 L44 52.5" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M42.60 30.50 L44 34" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M44 34 L60 37" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="40" cy="24" r="7" fill="none" stroke="currentColor" stroke-width="4.6"/>
+        <circle cx="40" cy="53" r="3" fill="currentColor"/>
+        <circle cx="48" cy="52" r="3" fill="currentColor"/>
+        <circle cx="38" cy="64" r="2.76" fill="currentColor"/>
+        <circle cx="53" cy="63" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      </svg>
       Snow <em>Lens</em>
     </a>
     <div class="badge">Early Test Build</div>
@@ -417,12 +430,9 @@
         return;
       }
       document.getElementById('coaching-text').textContent = data.coaching || 'Analysis complete.';
+      // Metrics hidden from user — coaching text carries the experience
       const row = document.getElementById('meta-row');
       row.innerHTML = '';
-      if (data.separation_angle != null)
-        row.innerHTML += `<div class="meta-pill">Separation <span>${data.separation_angle}°</span></div>`;
-      if (data.prior_session)
-        row.innerHTML += `<div class="meta-pill">vs ${data.prior_session.date} <span>${data.prior_session.separation_angle}°</span></div>`;
       setState('result');
     } catch (err) {
       clearInterval(timer);
