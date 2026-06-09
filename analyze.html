@@ -266,10 +266,19 @@
     .footer-note a:hover { color: var(--cyan); }
 
     /* Click-to-select preview */
-    .preview-wrapper { position: relative; margin-top: 14px; display: none; }
+    .preview-wrapper {
+      position: relative;
+      display: none;
+      margin: 16px auto 0;
+      width: fit-content;
+      max-width: 100%;
+    }
     .preview-wrapper.active { display: block; }
     .preview-wrapper video {
-      width: 100%; max-height: 280px; background: #000; display: block;
+      display: block;
+      max-width: 100%;
+      max-height: 440px;
+      background: #000;
       cursor: crosshair;
     }
     .click-marker {
@@ -278,6 +287,7 @@
       transform: translate(-50%, -50%); pointer-events: none;
       box-shadow: 0 0 0 3px rgba(0,0,0,0.6);
       display: none;
+      z-index: 5;
     }
     .click-marker.set { display: block; }
     .preview-instruction {
@@ -424,11 +434,26 @@
         clickData.time = preview.currentTime;
         marker.style.left = (xPct * 100) + '%';
         marker.style.top = (yPct * 100) + '%';
+        marker.style.opacity = '1';
         marker.classList.add('set');
-        instruction.textContent = 'Locked onto skier — tap again to change';
+        instruction.textContent = 'Locked onto skier at ' + clickData.time.toFixed(1) + 's — analyze when ready';
         instruction.classList.add('done');
         document.getElementById('submit-btn').disabled = false;
       });
+
+      function updateMarkerVisibility() {
+        if (clickData.x === null) return;
+        const diff = Math.abs(preview.currentTime - clickData.time);
+        if (!preview.paused || diff > 0.15) {
+          marker.style.opacity = '0.25';
+        } else {
+          marker.style.opacity = '1';
+        }
+      }
+      preview.addEventListener('play', updateMarkerVisibility);
+      preview.addEventListener('pause', updateMarkerVisibility);
+      preview.addEventListener('seeked', updateMarkerVisibility);
+      preview.addEventListener('timeupdate', updateMarkerVisibility);
     } else {
       preview = document.getElementById('video-preview');
       marker = document.getElementById('click-marker');
