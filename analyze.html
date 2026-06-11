@@ -1,569 +1,1246 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SnowLens — Analyze</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+"""
+SnowLens — Modal Inference Service
+====================================
 
-    :root {
-      --bg: #0d0d0d;
-      --surface: #141414;
-      --border: #1e1e1e;
-      --border-lit: #2a2a2a;
-      --text: #ffffff;
-      --text-muted: #888888;
-      --text-dim: #333333;
-      --cyan: #00e5c0;
-      --cyan-dim: rgba(0, 229, 192, 0.07);
-      --cyan-border: rgba(0, 229, 192, 0.2);
-      --coral: #ff5533;
-      --coral-dim: rgba(255, 85, 51, 0.08);
-      --coral-border: rgba(255, 85, 51, 0.25);
-      --display: 'Barlow Condensed', sans-serif;
-      --body: 'Barlow', sans-serif;
-    }
+Deploys the V2 analysis pipeline to Modal cloud GPU.
+Exposes a web endpoint that accepts video uploads and returns coaching JSON.
 
-    html, body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--body);
-      min-height: 100vh;
-    }
+Deploy:
+  modal deploy snowlens_modal.py
 
-    .page {
-      max-width: 700px;
-      margin: 0 auto;
-      padding: 40px 24px 96px;
-    }
+Test locally:
+  modal serve snowlens_modal.py
+"""
 
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 52px;
-    }
+import io
+import json
+import math
+import os
+import tempfile
+from pathlib import Path
 
-    .logo {
-      font-family: var(--display);
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--text);
-      text-decoration: none;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
+import modal
 
-    .logo-icon { width: 28px; height: 22px; color: var(--cyan); flex-shrink: 0; }
-    .logo em { color: var(--cyan); font-style: normal; }
+# ---------------------------------------------------------------------------
+# App + image definition
+# ---------------------------------------------------------------------------
 
-    .badge {
-      font-family: var(--display);
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--coral);
-      border: 1px solid var(--coral-border);
-      padding: 4px 12px;
-      background: var(--coral-dim);
-    }
+app = modal.App("snowlens-v2")
 
-    #state-idle, #state-processing, #state-result, #state-error { display: none; }
+# Container image: Python + all inference deps + ffmpeg
+image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("ffmpeg", "libgl1", "libglib2.0-0")
+    .pip_install(
+        "ultralytics==8.3.40",
+        "opencv-python-headless==4.10.0.84",
+        "numpy==1.26.4",
+        "pandas==2.2.3",
+        "anthropic==0.40.0",
+        "supabase==2.10.0",
+        "python-multipart==0.0.20",
+        "fastapi==0.115.6",
+        "lapx>=0.5.2",
+        "scipy>=1.13",
+        "matplotlib>=3.8",
+    )
+)
 
-    .title-block { margin-bottom: 36px; }
+# Cache the YOLO model in a Modal Volume so it's not re-downloaded every run
+volume = modal.Volume.from_name("snowlens-models", create_if_missing=True)
+MODEL_DIR = "/models"
+MODEL_NAME = "yolo11l-pose.pt"
 
-    .title-block h1 {
-      font-family: var(--display);
-      font-size: 42px;
-      font-weight: 800;
-      line-height: 1.05;
-      letter-spacing: -0.01em;
-      text-transform: uppercase;
-      margin-bottom: 10px;
-    }
+# ---------------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------------
 
-    .title-block h1 em { color: var(--cyan); font-style: normal; text-decoration: underline; text-decoration-color: var(--cyan); text-underline-offset: 4px; }
-    .title-block p { font-size: 15px; color: var(--text-muted); line-height: 1.65; max-width: 520px; }
+secrets = [
+    modal.Secret.from_name("anthropic-secret"),
+    modal.Secret.from_name("supabase-secret"),
+]
 
-    .upload-zone {
-      border: 1px solid var(--border-lit);
-      background: var(--surface);
-      padding: 52px 32px;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.2s;
-      position: relative;
-      margin-bottom: 16px;
-    }
+# ---------------------------------------------------------------------------
+# Model download function (run once to populate the volume)
+# ---------------------------------------------------------------------------
 
-    .upload-zone:hover, .upload-zone.drag-over {
-      border-color: var(--cyan-border);
-      background: var(--cyan-dim);
-    }
+@app.function(
+    image=image,
+    volumes={MODEL_DIR: volume},
+    secrets=secrets,
+    timeout=600,
+)
+def download_model():
+    """Run once to cache yolo11l-pose.pt in the Modal volume."""
+    import shutil, subprocess
+    from ultralytics import YOLO
+    model_path = Path(MODEL_DIR) / MODEL_NAME
+    if not model_path.exists():
+        print("Downloading yolo11l-pose.pt ...")
+        YOLO(MODEL_NAME)
+        result = subprocess.run(
+            ["find", "/", "-name", MODEL_NAME, "-type", "f"],
+            capture_output=True, text=True, timeout=30
+        )
+        cached = None
+        for line in result.stdout.strip().splitlines():
+            p = Path(line.strip())
+            if p.exists():
+                cached = p
+                break
+        if cached is None:
+            raise FileNotFoundError(f"Could not find {MODEL_NAME} after download")
+        shutil.copy(cached, model_path)
+        volume.commit()
+        print(f"Model saved to {model_path} (from {cached})")
+    else:
+        print("Model already cached.")
 
-    .upload-zone input[type="file"] {
-      position: absolute;
-      inset: 0;
-      opacity: 0;
-      cursor: pointer;
-      width: 100%;
-      height: 100%;
-    }
 
-    .upload-icon { width: 36px; height: 36px; margin: 0 auto 14px; color: var(--cyan); opacity: 0.5; }
+# ---------------------------------------------------------------------------
+# Core inference function
+# ---------------------------------------------------------------------------
 
-    .upload-zone h2 {
-      font-family: var(--display);
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      color: var(--text);
-      margin-bottom: 6px;
-    }
+@app.function(
+    image=image,
+    gpu="T4",
+    volumes={MODEL_DIR: volume},
+    secrets=secrets,
+    timeout=300,
+    memory=4096,
+    min_containers=0,
+)
+def analyze_video(
+    video_bytes: bytes,
+    sport: str,
+    user_id: str | None,
+    click_x: float | None = None,
+    click_y: float | None = None,
+    click_time: float | None = None,
+    debug: bool = False,
+) -> dict:
+    """
+    Run full V2 pipeline on a video clip.
 
-    .upload-zone p { font-size: 13px; color: var(--text-muted); }
-    .file-selected { margin-top: 14px; font-size: 13px; color: var(--cyan); font-weight: 500; }
+    Args:
+        video_bytes: Raw video file bytes
+        sport:       'ski' or 'snowboard'
+        user_id:     Supabase user ID (optional — for history lookup)
+        click_x:     Normalized x (0-1) of where the user tapped on the skier
+        click_y:     Normalized y (0-1) of where the user tapped on the skier
+        click_time:  Video time (seconds) when the user tapped
 
-    .requirements {
-      border-left: 2px solid var(--border-lit);
-      padding: 10px 16px;
-      margin-bottom: 28px;
-    }
+    Returns:
+        Coach payload dict
+    """
+    # Write video to temp file
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+        f.write(video_bytes)
+        video_path = f.name
 
-    .requirements p { font-size: 13px; color: var(--text-muted); line-height: 1.7; }
-    .requirements p strong { color: var(--text); font-weight: 500; }
+    try:
+        import cv2
+        import numpy as np
+        import pandas as pd
+        from ultralytics import YOLO
 
-    .submit-btn {
-      width: 100%;
-      padding: 16px;
-      background: var(--cyan);
-      color: #0d0d0d;
-      border: none;
-      font-family: var(--display);
-      font-size: 16px;
-      font-weight: 800;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition: opacity 0.15s;
-    }
+        model_path = str(Path(MODEL_DIR) / MODEL_NAME)
 
-    .submit-btn:hover { opacity: 0.88; }
-    .submit-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+        # 0. Sport detection — use form param directly, skip Claude Vision API call
+        if sport not in ("ski", "snowboard"):
+            sport = "ski"
+        print(f"Auto-detected sport: {sport}")
 
-    .processing-block { padding: 80px 0; text-align: center; }
+        # 1. Extract keypoints
 
-    .spinner {
-      width: 36px;
-      height: 36px;
-      border: 2px solid var(--border-lit);
-      border-top-color: var(--cyan);
-      border-radius: 50%;
-      margin: 0 auto 24px;
-      animation: spin 0.85s linear infinite;
-    }
+        model = YOLO(model_path)
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
 
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .processing-block h2 {
-      font-family: var(--display);
-      font-size: 22px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 8px;
-    }
-
-    .processing-block p { font-size: 14px; color: var(--text-muted); }
-    .processing-step { margin-top: 28px; font-size: 12px; color: var(--text-dim); letter-spacing: 0.06em; text-transform: uppercase; font-family: var(--display); min-height: 18px; }
-
-    .result-block { animation: fadeUp 0.35s ease; }
-    @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-
-    .result-eyebrow {
-      font-family: var(--display);
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--coral);
-      margin-bottom: 14px;
-    }
-
-    .coaching-card {
-      background: var(--surface);
-      border: 1px solid var(--border-lit);
-      border-left: 3px solid var(--cyan);
-      padding: 28px 32px;
-      margin-bottom: 20px;
-    }
-
-    .coaching-card p { font-size: 17px; line-height: 1.75; color: var(--text); }
-
-    .meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 36px; }
-
-    .meta-pill {
-      font-family: var(--display);
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      background: var(--surface);
-      border: 1px solid var(--border-lit);
-      padding: 5px 14px;
-    }
-
-    .meta-pill span { color: var(--cyan); }
-
-    .divider { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
-
-    .again-btn {
-      font-family: var(--display);
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      padding: 10px 20px;
-      background: transparent;
-      border: 1px solid var(--border-lit);
-      color: var(--text-muted);
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-
-    .again-btn:hover { border-color: var(--cyan-border); color: var(--cyan); }
-
-    .error-card {
-      background: var(--coral-dim);
-      border: 1px solid var(--coral-border);
-      padding: 22px 26px;
-      margin-bottom: 24px;
-    }
-
-    .error-card h3 {
-      font-family: var(--display);
-      font-size: 14px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--coral);
-      margin-bottom: 8px;
-    }
-
-    .error-card p { font-size: 14px; color: var(--text-muted); line-height: 1.6; }
-
-    .footer-note { margin-top: 56px; font-size: 12px; color: var(--text-dim); text-align: center; line-height: 1.8; }
-    .footer-note a { color: var(--text-muted); text-decoration: none; }
-    .footer-note a:hover { color: var(--cyan); }
-
-    /* Click-to-select preview */
-    .preview-wrapper {
-      position: relative;
-      display: none;
-      margin: 16px auto 0;
-      width: fit-content;
-      max-width: 100%;
-    }
-    .preview-wrapper.active { display: block; }
-    .preview-wrapper video {
-      display: block;
-      max-width: 100%;
-      max-height: 440px;
-      background: #000;
-      cursor: crosshair;
-    }
-    .click-marker {
-      position: absolute; width: 28px; height: 28px;
-      border: 2px solid var(--cyan); border-radius: 50%;
-      transform: translate(-50%, -50%); pointer-events: none;
-      box-shadow: 0 0 0 3px rgba(0,0,0,0.6);
-      display: none;
-      z-index: 5;
-    }
-    .click-marker.set { display: block; }
-    .preview-instruction {
-      font-family: var(--display);
-      font-size: 12px; font-weight: 600;
-      letter-spacing: 0.1em; text-transform: uppercase;
-      color: var(--cyan); margin-top: 10px; text-align: center;
-    }
-    .preview-instruction.done { color: var(--text-muted); }
-
-  </style>
-</head>
-<body>
-
-<div class="page">
-
-  <header class="header">
-    <a href="/" class="logo">
-      <svg class="logo-icon" viewBox="6 12 98 76" xmlns="http://www.w3.org/2000/svg" aria-label="SnowLens">
-        <path d="M9 69 Q50 83 95 49" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M40 53 L38 64 L33 73.08" fill="none" stroke="currentColor" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M48 52 L53 63 L52 70.75" fill="none" stroke="currentColor" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M40 53 L48 52" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M44 34 L44 52.5" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M42.60 30.50 L44 34" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M44 34 L60 37" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
-        <circle cx="40" cy="24" r="7" fill="none" stroke="currentColor" stroke-width="4.6"/>
-        <circle cx="40" cy="53" r="3" fill="currentColor"/>
-        <circle cx="48" cy="52" r="3" fill="currentColor"/>
-        <circle cx="38" cy="64" r="2.76" fill="currentColor"/>
-        <circle cx="53" cy="63" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
-      </svg>
-      Snow <em>Lens</em>
-    </a>
-    <div class="badge">Early Test Build</div>
-  </header>
-  </div>
-
-  <!-- IDLE -->
-  <div id="state-idle">
-    <div class="title-block">
-      <h1>Analyze<br>your <em>clip</em></h1>
-      <p>Upload a follow-cam video. SnowLens automatically detects your sport, runs pose detection, and returns coaching feedback on your body position.</p>
-    </div>
-    <div class="upload-zone" id="upload-zone">
-      <input type="file" id="video-input" accept="video/*" onchange="onFileSelected(this)">
-      <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-      </svg>
-      <h2>Drop your clip here</h2>
-      <p>MP4 or MOV · follow-cam only · max 500MB</p>
-      <div class="file-selected" id="file-name-display"></div>
-    </div>
-
-    <div class="requirements">
-      <p><strong>Requirements:</strong> Camera behind the rider · skiing or boarding only (no lift / hiking footage) · clip ≥ 4 seconds · at least 2 turns</p>
-    </div>
-
-    <button class="submit-btn" id="submit-btn" onclick="submitVideo()" disabled>
-      Analyze clip →
-    </button>
-  </div>
-
-  <!-- PROCESSING -->
-  <div id="state-processing">
-    <div class="processing-block">
-      <div class="spinner"></div>
-      <h2>Analyzing your clip</h2>
-      <p>Running pose detection and generating coaching feedback.</p>
-      <div class="processing-step" id="processing-step">Initializing...</div>
-    </div>
-  </div>
-
-  <!-- RESULT -->
-  <div id="state-result">
-    <div class="result-block">
-      <div class="result-eyebrow">What actually happened</div>
-      <div class="coaching-card">
-        <p id="coaching-text"></p>
-      </div>
-      <div class="meta-row" id="meta-row"></div>
-      <hr class="divider">
-      <button class="again-btn" onclick="resetPage()">← Analyze another clip</button>
-    </div>
-  </div>
-
-  <!-- ERROR -->
-  <div id="state-error">
-    <div class="error-card">
-      <h3>Clip rejected</h3>
-      <p id="error-text"></p>
-    </div>
-    <button class="again-btn" onclick="resetPage()">← Try another clip</button>
-  </div>
-
-  <div class="footer-note">
-    SnowLens internal test build · not for public distribution<br>
-    <a href="/">← Back to main site</a>
-  </div>
-
-</div>
-
-<script>
-  const MODAL_URL = 'https://d3lynch26-stack--snowlens-v2-fastapi-app.modal.run/analyze';
-  let selectedFile = null;
-
-  function init() {
-    setState('idle');
-  }
-
-  let clickData = { x: null, y: null, time: null };
-
-  function showPreview(file) {
-    let wrap = document.getElementById('preview-wrapper');
-    let preview, marker, instruction;
-    if (!wrap) {
-      wrap = document.createElement('div');
-      wrap.id = 'preview-wrapper';
-      wrap.className = 'preview-wrapper';
-      preview = document.createElement('video');
-      preview.id = 'video-preview';
-      preview.controls = true;
-      preview.muted = true;
-      preview.playsInline = true;
-      marker = document.createElement('div');
-      marker.id = 'click-marker';
-      marker.className = 'click-marker';
-      instruction = document.createElement('div');
-      instruction.id = 'preview-instruction';
-      instruction.className = 'preview-instruction';
-      instruction.textContent = 'Tap on the skier to lock onto them';
-      wrap.appendChild(preview);
-      wrap.appendChild(marker);
-      wrap.appendChild(instruction);
-      document.getElementById('upload-zone').after(wrap);
-
-      preview.addEventListener('click', (e) => {
-        if (!preview.paused) preview.pause();
-        const rect = preview.getBoundingClientRect();
-        const xPct = (e.clientX - rect.left) / rect.width;
-        const yPct = (e.clientY - rect.top) / rect.height;
-        clickData.x = Math.max(0, Math.min(1, xPct));
-        clickData.y = Math.max(0, Math.min(1, yPct));
-        clickData.time = preview.currentTime;
-        marker.style.left = (xPct * 100) + '%';
-        marker.style.top = (yPct * 100) + '%';
-        marker.style.opacity = '1';
-        marker.classList.add('set');
-        instruction.textContent = 'Locked onto skier at ' + clickData.time.toFixed(1) + 's — analyze when ready';
-        instruction.classList.add('done');
-        document.getElementById('submit-btn').disabled = false;
-      });
-
-      function updateMarkerVisibility() {
-        if (clickData.x === null) return;
-        const diff = Math.abs(preview.currentTime - clickData.time);
-        if (!preview.paused || diff > 0.15) {
-          marker.style.opacity = '0.25';
-        } else {
-          marker.style.opacity = '1';
+        # Debug accumulator — populated throughout pipeline, returned if debug=True
+        dbg = {
+            "rider_selection": {},
+            "turn_detection": {},
+            "metrics": {},
+            "rejection": {},
+            "coaching": {},
+            "video": {
+                "fps": fps,
+                "width": w,
+                "height": h,
+                "is_portrait": h > w,
+                "portrait_orientation": h > w,
+            },
         }
-      }
-      preview.addEventListener('play', updateMarkerVisibility);
-      preview.addEventListener('pause', updateMarkerVisibility);
-      preview.addEventListener('seeked', updateMarkerVisibility);
-      preview.addEventListener('timeupdate', updateMarkerVisibility);
-    } else {
-      preview = document.getElementById('video-preview');
-      marker = document.getElementById('click-marker');
-      instruction = document.getElementById('preview-instruction');
-      marker.classList.remove('set');
-      instruction.classList.remove('done');
-      instruction.textContent = 'Tap on the skier to lock onto them';
-      clickData = { x: null, y: null, time: null };
-    }
-    wrap.classList.add('active');
-    preview.src = URL.createObjectURL(file);
-    document.getElementById('submit-btn').disabled = true;
-  }
 
-  function onFileSelected(input) {
-    if (input.files && input.files[0]) {
-      selectedFile = input.files[0];
-      document.getElementById('file-name-display').textContent = selectedFile.name;
-      showPreview(selectedFile);
-      // Submit stays disabled until user taps the skier
-    }
-  }
+        # Downscale 4K/2.7K to 1080p max — cuts memory and speeds inference
+        MAX_DIM = 1920
+        if max(w, h) > MAX_DIM:
+            scale = MAX_DIM / max(w, h)
+            w = int(w * scale)
+            h = int(h * scale)
+            scaled_path = video_path + "_scaled.mp4"
+            import subprocess
+            subprocess.run([
+                "ffmpeg", "-i", video_path,
+                "-vf", f"scale={w}:{h}",
+                "-c:v", "libx264", "-preset", "fast",
+                "-y", scaled_path
+            ], capture_output=True)
+            video_path = scaled_path
 
-  const zone = document.getElementById('upload-zone');
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-  zone.addEventListener('drop', e => {
-    e.preventDefault();
-    zone.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('video/')) {
-      selectedFile = file;
-      document.getElementById('file-name-display').textContent = file.name;
-      showPreview(file);
-      // Submit stays disabled until user taps the skier
-    }
-  });
+        COCO_KEYPOINTS = [
+            "nose", "l_eye", "r_eye", "l_ear", "r_ear",
+            "l_shoulder", "r_shoulder", "l_elbow", "r_elbow",
+            "l_wrist", "r_wrist", "l_hip", "r_hip",
+            "l_knee", "r_knee", "l_ankle", "r_ankle",
+        ]
+        KP_CONF_MIN = 0.40
 
-  function setState(name) {
-    ['idle','processing','result','error'].forEach(s => {
-      document.getElementById(`state-${s}`).style.display = s === name ? 'block' : 'none';
-    });
-  }
+        # Dynamic frame sampling based on FPS — optimized for speed
+        if fps > 90:
+            FRAME_SAMPLE = 12   # 120fps / 240fps (GoPro high speed)
+        elif fps > 45:
+            FRAME_SAMPLE = 6    # 60fps
+        else:
+            FRAME_SAMPLE = 4    # 30fps standard — was 3, 4 cuts ~25% time with minimal quality loss
 
-  const steps = [
-    'Uploading clip...',
-    'Running pose detection...',
-    'Computing separation angle...',
-    'Generating coaching feedback...',
-    'Almost done...',
-  ];
+        rows = []
+        # Tracking: collect all detections per frame, identify target track later
+        all_detections = []  # one dict per (frame, person) — used to pick the target track
+        track_results = model.track(
+            video_path, stream=True, verbose=False, vid_stride=FRAME_SAMPLE,
+            persist=True, tracker="bytetrack.yaml"
+        )
+        for frame_idx, result in enumerate(track_results):
+            actual_frame = frame_idx * FRAME_SAMPLE
+            t_s = actual_frame / fps
+            boxes = result.boxes
+            kp_obj = result.keypoints
+            if (boxes is None or kp_obj is None or kp_obj.xy is None or
+                    kp_obj.conf is None or len(kp_obj.xy) == 0):
+                continue
+            xys = kp_obj.xy.cpu().numpy()
+            confs = kp_obj.conf.cpu().numpy()
+            box_xyxy = boxes.xyxy.cpu().numpy() if boxes.xyxy is not None else None
+            track_ids = (boxes.id.int().cpu().numpy()
+                         if boxes.id is not None else None)
+            for i in range(xys.shape[0]):
+                if not (confs[i] > 0.10).any():
+                    continue
+                tid = int(track_ids[i]) if track_ids is not None else -1
+                bbox = box_xyxy[i].tolist() if box_xyxy is not None else None
+                all_detections.append({
+                    "frame": actual_frame,
+                    "time_s": t_s,
+                    "track_id": tid,
+                    "bbox": bbox,
+                    "kp_xy": xys[i],
+                    "kp_conf": confs[i],
+                    "person_conf": float(confs[i].mean()),
+                })
 
-  function cycleSteps() {
-    let i = 0;
-    const el = document.getElementById('processing-step');
-    el.textContent = steps[0];
-    return setInterval(() => {
-      i = Math.min(i + 1, steps.length - 1);
-      el.textContent = steps[i];
-    }, 8000);
-  }
+        # Identify target track ID
+        target_track_id = None
+        _click_matched = False
+        _click_distance = None
+        _candidates_near_click = 0
+        if click_x is not None and click_y is not None and click_time is not None:
+            click_px = click_x * w
+            click_py = click_y * h
+            # Look at detections within 0.5s of click
+            candidates = [d for d in all_detections
+                          if abs(d["time_s"] - click_time) <= 0.5 and d["bbox"]]
+            _candidates_near_click = len(candidates)
+            # Score by distance from click center
+            best_score = float("inf")
+            for d in candidates:
+                x1, y1, x2, y2 = d["bbox"]
+                # Hard requirement: click must fall inside box (with small tolerance)
+                tol = max(w, h) * 0.05
+                if not (x1 - tol <= click_px <= x2 + tol and y1 - tol <= click_py <= y2 + tol):
+                    continue
+                cx = (x1 + x2) / 2
+                cy = (y1 + y2) / 2
+                dist = ((cx - click_px) ** 2 + (cy - click_py) ** 2) ** 0.5
+                time_penalty = abs(d["time_s"] - click_time) * 100
+                score = dist + time_penalty
+                if score < best_score:
+                    best_score = score
+                    _click_distance = round(dist, 1)
+                    target_track_id = d["track_id"]
+            if target_track_id is not None:
+                _click_matched = True
+                print(f"Click locked onto track ID {target_track_id}")
+            else:
+                print("Click did not match any detection — falling back to auto-select")
 
-  async function submitVideo() {
-    if (!selectedFile) return;
-    setState('processing');
-    const timer = cycleSteps();
-    try {
-      const fd = new FormData();
-      fd.append('video', selectedFile);
-      if (clickData.x !== null) {
-        fd.append('click_x', clickData.x);
-        fd.append('click_y', clickData.y);
-        fd.append('click_time', clickData.time);
-      }
-      const res = await fetch(MODAL_URL, { method: 'POST', body: fd });
-      clearInterval(timer);
-      if (!res.ok) throw new Error(`Server error ${res.status}`);
-      const data = await res.json();
-      if (data.status === 'rejected') {
-        document.getElementById('error-text').textContent =
-          data.reasons ? data.reasons.join(' ') : 'Clip did not pass quality gate.';
-        setState('error');
-        return;
-      }
-      document.getElementById('coaching-text').textContent = data.coaching || 'Analysis complete.';
-      // Metrics hidden from user — coaching text carries the experience
-      const row = document.getElementById('meta-row');
-      row.innerHTML = '';
-      setState('result');
-    } catch (err) {
-      clearInterval(timer);
-      document.getElementById('error-text').textContent = err.message || 'Something went wrong.';
-      setState('error');
-    }
-  }
+        # Fallback: pick most prominent track in early frames
+        _fallback_used = not _click_matched
+        if target_track_id is None:
+            early = [d for d in all_detections if d["time_s"] < 3.0]
+            if not early:
+                early = all_detections
+            from collections import Counter
+            id_counts = Counter(d["track_id"] for d in early if d["track_id"] != -1)
+            if id_counts:
+                target_track_id = id_counts.most_common(1)[0][0]
+            elif all_detections:
+                # No track IDs at all — fall back to picking most-central per frame
+                target_track_id = -1
+            print(f"Auto-selected track ID {target_track_id}")
 
-  function resetPage() {
-    selectedFile = null;
-    clickData = { x: null, y: null, time: null };
-    document.getElementById('file-name-display').textContent = '';
-    document.getElementById('submit-btn').disabled = true;
-    document.getElementById('video-input').value = '';
-    const wrap = document.getElementById('preview-wrapper');
-    if (wrap) { wrap.classList.remove('active'); }
-    const p = document.getElementById('video-preview');
-    if (p) URL.revokeObjectURL(p.src);
-    setState('idle');
-  }
+        # Unique rider count from all detections
+        _unique_riders = len(set(d["track_id"] for d in all_detections if d["track_id"] != -1))
 
-  init();
-</script>
-</body>
-</html>
+        # Build rows from target track only
+        target_dets = [d for d in all_detections if d["track_id"] == target_track_id]
+        if target_track_id == -1:
+            # No tracker IDs available — group by frame and pick most central detection
+            by_frame = {}
+            for d in all_detections:
+                by_frame.setdefault(d["frame"], []).append(d)
+            target_dets = []
+            for frame, dets in by_frame.items():
+                best = min(dets, key=lambda dd: (
+                    abs((dd["bbox"][0] + dd["bbox"][2]) / 2 - w / 2) if dd["bbox"] else 0
+                ))
+                target_dets.append(best)
+
+        target_dets.sort(key=lambda d: d["frame"])
+        print(f"Detections: {len(all_detections)} total | Target track ID {target_track_id} has {len(target_dets)} detections")
+
+        # Compute mean bounding box width — used later for flat-terrain normalization
+        _bbox_widths = [d["bbox"][2] - d["bbox"][0] for d in target_dets if d.get("bbox") is not None]
+        mean_bbox_width = float(np.mean(_bbox_widths)) if _bbox_widths else w * 0.15
+
+        # --- Track-swap diagnostics (debug only, never user-facing) ---
+        # Detects likely mid-clip ID swaps: sudden bbox size jumps or position jumps.
+        _swap_events = []
+        _prev_bbox = None
+        for _d in target_dets:
+            if _d.get("bbox") is None:
+                continue
+            x1, y1, x2, y2 = _d["bbox"]
+            _bw = x2 - x1
+            _bh = y2 - y1
+            _cx = (x1 + x2) / 2
+            _cy = (y1 + y2) / 2
+            if _prev_bbox is not None:
+                _pw, _ph, _pcx, _pcy = _prev_bbox
+                # Size jump: bbox width changes by >60% in one step
+                _size_ratio = _bw / _pw if _pw > 0 else 1.0
+                # Position jump: center moves >25% of frame width in one step
+                _pos_jump = abs(_cx - _pcx) / w
+                if _size_ratio > 1.6 or _size_ratio < 0.4 or _pos_jump > 0.25:
+                    _swap_events.append({
+                        "frame": _d["frame"],
+                        "size_ratio": round(_size_ratio, 2),
+                        "pos_jump_pct": round(_pos_jump * 100, 1),
+                    })
+            _prev_bbox = (_bw, _bh, _cx, _cy)
+
+        track_swap_suspected = len(_swap_events) > 0
+        dbg["rider_selection"]["track_swap_suspected"] = track_swap_suspected
+        dbg["rider_selection"]["track_swap_events"] = _swap_events[:5]  # cap at 5 for brevity
+
+        dbg["rider_selection"] = {
+            "click_x": click_x,
+            "click_y": click_y,
+            "click_time": click_time,
+            "click_matched": _click_matched,
+            "fallback_used": _fallback_used,
+            "selected_track_id": target_track_id,
+            "unique_rider_count": _unique_riders,
+            "total_detections": len(all_detections),
+            "target_detections": len(target_dets),
+            "candidates_near_click": _candidates_near_click,
+            "distance_click_to_rider_px": _click_distance,
+            "portrait_orientation": h > w,
+        }
+
+        # --- Multi-rider soft gate ---
+        # If multiple riders are detected and no click was provided, we can't reliably
+        # identify the intended subject. Wrong-rider coaching is worse than no coaching.
+        if _unique_riders >= 2 and not _click_matched:
+            dbg["pipeline_exit_reason"] = "multi_rider_no_click"
+            result = {"status": "rejected", "sport": sport,
+                      "reasons": ["Multiple skiers detected. Re-upload and tap the skier you want analyzed."]}
+            if debug:
+                result["_debug"] = dbg
+            return result
+        # Build the frame-level dataframe (one row per sampled frame; missing frames are NaN)
+        target_by_frame = {d["frame"]: d for d in target_dets}
+        for frame_idx in range(0, len(all_detections) and (max(d["frame"] for d in all_detections) // FRAME_SAMPLE + 1) or 1):
+            pass  # placeholder — we'll iterate sampled frames directly below
+
+        # Determine the full sampled-frame range we processed
+        if all_detections:
+            max_frame = max(d["frame"] for d in all_detections)
+        else:
+            max_frame = 0
+        sampled_frames = list(range(0, max_frame + 1, FRAME_SAMPLE))
+
+        for actual_frame in sampled_frames:
+            row = {"frame": actual_frame, "time_s": actual_frame / fps}
+            d = target_by_frame.get(actual_frame)
+            if d is None:
+                row["person_conf"] = 0.0
+                for n in COCO_KEYPOINTS:
+                    row[f"{n}_x"] = np.nan
+                    row[f"{n}_y"] = np.nan
+                    row[f"{n}_conf"] = 0.0
+            else:
+                row["person_conf"] = d["person_conf"]
+                kp_xy = d["kp_xy"]
+                kp_conf = d["kp_conf"]
+                for i, n in enumerate(COCO_KEYPOINTS):
+                    if kp_conf[i] >= KP_CONF_MIN:
+                        row[f"{n}_x"] = float(kp_xy[i, 0])
+                        row[f"{n}_y"] = float(kp_xy[i, 1])
+                    else:
+                        row[f"{n}_x"] = np.nan
+                        row[f"{n}_y"] = np.nan
+                    row[f"{n}_conf"] = float(kp_conf[i])
+            rows.append(row)
+
+        df = pd.DataFrame(rows)
+        df.attrs["fps"] = fps
+        df.attrs["width"] = w
+        df.attrs["height"] = h
+
+        # effective_fps: rows per second in the sampled dataframe
+        # All duration/timing calculations on df must use this, not raw fps
+        effective_fps = fps / FRAME_SAMPLE
+        dbg["video"]["effective_fps"] = round(effective_fps, 2)
+        dbg["video"]["frame_sample"] = FRAME_SAMPLE
+
+        # 1b. Find longest usable window — skier close = good, far away = bad
+        # Combine detection rate AND motion to avoid passing standing/lift footage
+        detected = (df["person_conf"] > 0.30).astype(float)
+        det_window = max(int(effective_fps), 3)  # ~1s window in sampled rows
+        rolling_det = detected.rolling(det_window, center=True, min_periods=max(det_window // 2, 2)).mean()
+
+        # Hip motion (normalized rolling std) — separates skiing from standing/lift
+        hip_norm = ((df["l_hip_x"] + df["r_hip_x"]) / 2 / w)
+        rolling_motion = hip_norm.rolling(det_window, center=True, min_periods=max(det_window // 2, 2)).std()
+
+        good = ((rolling_det >= 0.60) & (rolling_motion >= 0.015)).fillna(False).values
+
+        # Find longest contiguous run of "good" frames
+        best_start = best_end = None
+        best_len = 0
+        cur_start = None
+        for i, g in enumerate(good):
+            if g and cur_start is None:
+                cur_start = i
+            elif not g and cur_start is not None:
+                run_len = i - cur_start
+                if run_len > best_len:
+                    best_len = run_len
+                    best_start = cur_start
+                    best_end = i - 1
+                cur_start = None
+        if cur_start is not None:
+            run_len = len(good) - cur_start
+            if run_len > best_len:
+                best_len = run_len
+                best_start = cur_start
+                best_end = len(good) - 1
+
+        # If a usable window of >=4s exists and is shorter than the full clip, trim to it
+        original_duration = len(df) / effective_fps
+        if best_start is not None and best_len / effective_fps >= 4.0 and best_len < len(df):
+            # 1c. Expand window inward to nearest baseline crossings — avoid mid-turn edges
+            window_hip = hip_norm.iloc[best_start:best_end + 1].dropna()
+            if len(window_hip) >= 10:
+                baseline_x = float(window_hip.mean())
+                hip_vals = hip_norm.iloc[best_start:best_end + 1].values
+                # Find indices in this window where hip crosses baseline
+                centered = hip_vals - baseline_x
+                signs = np.sign(centered)
+                # Crossings: places where sign changes (and not NaN)
+                crossings = []
+                last_sign = 0
+                for i, s in enumerate(signs):
+                    if not np.isnan(s) and s != 0:
+                        if last_sign != 0 and s != last_sign:
+                            crossings.append(i)
+                        last_sign = s
+
+                if len(crossings) >= 2:
+                    # First crossing from start, last crossing from end
+                    new_start_off = crossings[0]
+                    new_end_off = crossings[-1]
+                    new_start = best_start + new_start_off
+                    new_end = best_start + new_end_off
+                    new_len = new_end - new_start + 1
+                    # Only use if still long enough
+                    if new_len / effective_fps >= 4.0:
+                        best_start = new_start
+                        best_end = new_end
+                        best_len = new_len
+
+            print(f"Trimmed clip: usable window {best_start}-{best_end} ({best_len/effective_fps:.1f}s of {original_duration:.1f}s)")
+            df = df.iloc[best_start:best_end + 1].reset_index(drop=True)
+
+        # 2. Rejection gate
+        duration = len(df) / effective_fps
+        detection_rate = float((df["person_conf"] > 0.30).mean())
+        hip_x = ((df["l_hip_x"] + df["r_hip_x"]) / 2).dropna()
+        hip_y = ((df["l_hip_y"] + df["r_hip_y"]) / 2).dropna()
+        motion_score = float(np.hypot(hip_x.std(), hip_y.std()) / w) if len(hip_x) >= 5 else 0.0
+
+        reasons = []
+        if duration < 4.0:
+            reasons.append(f"Clip too short ({duration:.1f}s, need ≥4s of usable footage).")
+        if original_duration > 90.0:
+            reasons.append(f"Clip too long ({original_duration:.0f}s). Keep it under 60 seconds — 3-5 turns is all we need.")
+        if detection_rate < 0.60:
+            reasons.append(f"Rider not detected consistently — likely too far from camera. Try a clip where the rider stays close to the camera.")
+        if motion_score < 0.020:
+            reasons.append("Not enough motion detected.")
+
+        if reasons:
+            print(f"REJECTED: duration={duration:.1f}s detection={detection_rate:.2f} motion={motion_score:.4f} reasons={reasons}")
+            dbg["rejection"] = {
+                "rejected": True,
+                "duration_s": round(duration, 2),
+                "detection_rate": round(detection_rate, 3),
+                "motion_score": round(motion_score, 4),
+                "reasons": reasons,
+            }
+            # Determine specific exit reason from rejection causes
+            if any("short" in r.lower() for r in reasons):
+                _exit = "clip_too_short"
+            elif any("long" in r.lower() for r in reasons):
+                _exit = "clip_too_long"
+            elif any("detected" in r.lower() or "far from camera" in r.lower() for r in reasons):
+                _exit = "low_detection_rate"
+            elif any("motion" in r.lower() for r in reasons):
+                _exit = "insufficient_motion"
+            else:
+                _exit = "rejected"
+            dbg["pipeline_exit_reason"] = _exit
+            result = {"status": "rejected", "sport": sport, "reasons": reasons}
+            if debug:
+                result["_debug"] = dbg
+            return result
+        print(f"Passed gates: duration={duration:.1f}s detection={detection_rate:.2f} motion={motion_score:.4f}")
+        dbg["rejection"] = {
+            "rejected": False,
+            "duration_s": round(duration, 2),
+            "detection_rate": round(detection_rate, 3),
+            "motion_score": round(motion_score, 4),
+        }
+
+        # 3. Compute separation angle
+        def line_angle(x1, y1, x2, y2):
+            return np.degrees(np.arctan2(y2 - y1, x2 - x1))
+
+        def angular_diff(a, b):
+            return np.abs(((a - b + 180) % 360) - 180)
+
+        sh = line_angle(df["l_shoulder_x"], df["l_shoulder_y"],
+                        df["r_shoulder_x"], df["r_shoulder_y"])
+        hp = line_angle(df["l_hip_x"], df["l_hip_y"],
+                        df["r_hip_x"], df["r_hip_y"])
+        sh_s = sh.rolling(7, center=True, min_periods=4).mean()
+        hp_s = hp.rolling(7, center=True, min_periods=4).mean()
+        sep = angular_diff(sh_s, hp_s).dropna()
+        sep_angle = float(sep.mean()) if len(sep) >= 10 else None
+
+        # 3b. Turn detection via hip x-coordinate oscillation
+        from scipy.signal import find_peaks
+        hip_mid_x = ((df["l_hip_x"] + df["r_hip_x"]) / 2)
+        hip_mid_y = ((df["l_hip_y"] + df["r_hip_y"]) / 2)
+        sh_mid_x = ((df["l_shoulder_x"] + df["r_shoulder_x"]) / 2)
+        sh_mid_y = ((df["l_shoulder_y"] + df["r_shoulder_y"]) / 2)
+
+        # --- Shadow / body-geometry validation ---
+        # Shadows change shape over time; real skiers don't. Coefficient of variation
+        # measures proportional instability — high CV = not a real person.
+        _sw_mask = df["l_shoulder_x"].notna() & df["r_shoulder_x"].notna()
+        _shoulder_widths = (df.loc[_sw_mask, "r_shoulder_x"] - df.loc[_sw_mask, "l_shoulder_x"]).abs()
+        _tl_mask = _sw_mask & df["l_hip_y"].notna() & df["r_hip_y"].notna() & df["l_shoulder_y"].notna() & df["r_shoulder_y"].notna()
+        _sh_mid_y_masked = (df.loc[_tl_mask, "l_shoulder_y"] + df.loc[_tl_mask, "r_shoulder_y"]) / 2
+        _hip_mid_y_masked = (df.loc[_tl_mask, "l_hip_y"] + df.loc[_tl_mask, "r_hip_y"]) / 2
+        _torso_lengths = (_hip_mid_y_masked - _sh_mid_y_masked).abs()
+
+        shoulder_width_cv = (float(_shoulder_widths.std() / _shoulder_widths.mean())
+                             if len(_shoulder_widths) >= 10 and _shoulder_widths.mean() > 0 else None)
+        torso_length_cv   = (float(_torso_lengths.std() / _torso_lengths.mean())
+                             if len(_torso_lengths) >= 10 and _torso_lengths.mean() > 0 else None)
+
+        _cv_values = [v for v in [shoulder_width_cv, torso_length_cv] if v is not None]
+        _cv_max = max(_cv_values) if _cv_values else None
+
+        # Thresholds: > 0.50 = hard reject (obvious shadow/non-person), 0.35-0.50 = warn
+        if _cv_max is not None and _cv_max > 0.50:
+            body_geometry_quality = "fail"
+        elif _cv_max is not None and _cv_max > 0.35:
+            body_geometry_quality = "warn"
+        else:
+            body_geometry_quality = "ok"
+        shadow_risk_flag = body_geometry_quality in ("fail", "warn")
+
+        dbg["body_geometry"] = {
+            "shoulder_width_cv": round(shoulder_width_cv, 3) if shoulder_width_cv is not None else None,
+            "torso_length_cv":   round(torso_length_cv, 3)   if torso_length_cv   is not None else None,
+            "body_geometry_quality": body_geometry_quality,
+            "shadow_risk_flag": shadow_risk_flag,
+        }
+
+        if body_geometry_quality == "fail":
+            print(f"Shadow risk FAIL (CV={_cv_max:.3f}) — hard rejecting")
+            dbg["pipeline_exit_reason"] = "shadow_rejection"
+            result = {"status": "rejected", "sport": sport,
+                      "reasons": ["Couldn't reliably track the skier throughout the clip. Try a closer follow-cam video."]}
+            if debug:
+                result["_debug"] = dbg
+            return result
+
+        # Light smoothing only — heavy smoothing erases turn signal
+        smooth_window = max(int(effective_fps / 6), 2)  # ~0.17s window in sampled rows
+        hip_smooth = hip_mid_x.rolling(smooth_window, center=True, min_periods=2).mean()
+        hip_filled = hip_smooth.ffill().bfill().values
+
+        # Prominence threshold: peaks must stand out from baseline noise
+        hip_range = float(np.nanmax(hip_filled) - np.nanmin(hip_filled))
+        prominence_threshold = max(hip_range * 0.10, w * 0.02) if hip_range > 0 else None
+        min_distance = int(max(effective_fps * 0.3, 3))  # 0.3s min turn separation in sampled rows
+
+        peaks_max, _ = find_peaks(hip_filled, distance=min_distance, prominence=prominence_threshold)
+        peaks_min, _ = find_peaks(-hip_filled, distance=min_distance, prominence=prominence_threshold)
+        all_extrema = sorted(list(peaks_max) + list(peaks_min))
+        num_turns = max(0, len(all_extrema) - 1)
+
+        # Turn duration diagnostics
+        turn_durations = []
+        turn_directions = []
+        for i in range(len(all_extrema) - 1):
+            dur = (all_extrema[i+1] - all_extrema[i]) / effective_fps
+            turn_durations.append(round(dur, 2))
+            # Direction: peak_max → peak_min = left turn (hip moves left→right), vice versa
+            is_start_max = all_extrema[i] in peaks_max
+            turn_directions.append("left_to_right" if is_start_max else "right_to_left")
+        suspiciously_short = [d for d in turn_durations if d < 0.5]
+
+        # Turn quality flag — simple heuristic for downstream trust
+        _turn_variance = float(pd.Series(turn_durations).std()) if len(turn_durations) > 1 else 0.0
+        if (num_turns < 2 or hip_range < w * 0.05 or
+                len(suspiciously_short) > 0 or _turn_variance > 1.5):
+            _turn_quality = "fail"
+        elif (num_turns == 2 or hip_range < w * 0.10 or
+              _turn_variance > 0.8 or (turn_durations and min(turn_durations) < 0.8)):
+            _turn_quality = "warn"
+        else:
+            _turn_quality = "good"
+
+        dbg["turn_detection"] = {
+            "turn_quality": _turn_quality,
+            "num_extrema": len(all_extrema),
+            "extrema_frames": [int(e) for e in all_extrema],
+            "turn_durations_s": turn_durations,
+            "avg_turn_duration_s": round(sum(turn_durations)/len(turn_durations), 2) if turn_durations else None,
+            "min_turn_duration_s": round(min(turn_durations), 2) if turn_durations else None,
+            "max_turn_duration_s": round(max(turn_durations), 2) if turn_durations else None,
+            "turn_duration_variance": round(float(pd.Series(turn_durations).std()), 3) if len(turn_durations) > 1 else None,
+            "suspiciously_short_turns": suspiciously_short,
+            "turn_directions": turn_directions,
+            "hip_range_px": round(hip_range, 1),
+            "prominence_threshold_px": round(prominence_threshold, 1) if prominence_threshold else None,
+        }
+
+        # Turn detection visualization — debug only, base64 PNG
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            import base64
+            import io as _io
+            _fig, _ax = plt.subplots(figsize=(10, 3))
+            _ax.plot(hip_filled, color="steelblue", linewidth=1, label="hip_mid_x")
+            _baseline_val = float(np.nanmean(hip_filled))
+            _ax.axhline(_baseline_val, color="gray", linestyle="--", linewidth=0.8, label="baseline")
+            for _e in peaks_max:
+                _ax.axvline(_e, color="orange", alpha=0.8, linewidth=1, label="peak_max" if _e == peaks_max[0] else "")
+            for _e in peaks_min:
+                _ax.axvline(_e, color="purple", alpha=0.8, linewidth=1, label="peak_min" if _e == peaks_min[0] else "")
+            for _i in range(len(all_extrema) - 1):
+                _ax.axvspan(all_extrema[_i], all_extrema[_i + 1],
+                            alpha=0.08, color="green" if _i % 2 == 0 else "red")
+            _ax.set_title(f"Turn detection — {num_turns} turns | quality: {_turn_quality}")
+            _ax.set_xlabel("sampled frame index")
+            _ax.set_ylabel("hip_mid_x (px)")
+            _ax.legend(fontsize=7, loc="upper right")
+            _fig.tight_layout()
+            _buf = _io.BytesIO()
+            _fig.savefig(_buf, format="png", dpi=80)
+            plt.close(_fig)
+            _buf.seek(0)
+            dbg["turn_viz_base64"] = base64.b64encode(_buf.read()).decode()
+        except Exception as _viz_err:
+            dbg["turn_viz_base64"] = f"error: {_viz_err}"
+
+        # Reject if not enough turns
+        if num_turns < 2:
+            dbg["pipeline_exit_reason"] = "insufficient_turns"
+            result = {"status": "rejected", "sport": sport,
+                    "reasons": [f"Need at least 2 turns — detected {num_turns}. Try a longer clip with multiple turns."]}
+            if debug:
+                result["_debug"] = dbg
+            return result
+
+        # Reject on turn quality fail when combined with low turn count or low confidence
+        # Pure fail alone is too aggressive — some valid clips have noisy turn detection.
+        # Threshold: fail + fewer than 3 turns = not enough signal to trust coaching.
+        # Revisit after next batch if valid passes are still slipping through.
+        if _turn_quality == "fail" and num_turns < 3:
+            dbg["pipeline_exit_reason"] = "turn_quality_rejection"
+            result = {"status": "rejected", "sport": sport,
+                      "reasons": ["Couldn't clearly identify consistent turns in this clip. Try a clip with several visible turns filmed from behind."]}
+            if debug:
+                result["_debug"] = dbg
+            return result
+
+        # --- Flat-terrain / turn-amplitude gate ---
+        # Normalize hip displacement against rider bounding box width to handle
+        # near vs far riders consistently. Threshold tuned conservatively to avoid
+        # rejecting beginner clips with smaller but real turns.
+        hip_range_normalized = hip_range / mean_bbox_width if mean_bbox_width > 0 else 0.0
+        flat_terrain_flag = False
+        flat_terrain_reason = None
+
+        if hip_range_normalized < 0.25:
+            flat_terrain_flag = True
+            flat_terrain_reason = "no_meaningful_turns"  # hard reject
+        elif hip_range_normalized < 0.35:
+            flat_terrain_flag = True
+            flat_terrain_reason = "low_amplitude_warn"   # soft warn — lowers confidence tier only
+
+        dbg["flat_terrain"] = {
+            "hip_range_px":         round(hip_range, 1),
+            "mean_bbox_width":      round(mean_bbox_width, 1),
+            "hip_range_normalized": round(hip_range_normalized, 3),
+            "flat_terrain_flag":    flat_terrain_flag,
+            "flat_terrain_reason":  flat_terrain_reason,
+        }
+
+        if flat_terrain_reason == "no_meaningful_turns":
+            dbg["pipeline_exit_reason"] = "flat_terrain"
+            result = {"status": "rejected", "sport": sport,
+                      "reasons": ["Clip doesn't show enough turn shape — try a follow-cam clip with clear left and right turns."]}
+            if debug:
+                result["_debug"] = dbg
+            return result
+
+        # 3c. Assign phase to each frame (initiation / apex / completion)
+        phases = ["unknown"] * len(df)
+        for i in range(len(all_extrema) - 1):
+            start = all_extrema[i]
+            end = all_extrema[i + 1]
+            turn_len = end - start
+            if turn_len < 3:
+                continue
+            third = max(1, turn_len // 3)
+            for j in range(start, min(start + third, len(df))):
+                phases[j] = "initiation"
+            for j in range(start + third, min(start + 2 * third, len(df))):
+                phases[j] = "apex"
+            for j in range(start + 2 * third, min(end, len(df))):
+                phases[j] = "completion"
+        df["phase"] = phases
+
+        # 3d. Early Inside Lean — torso tilt during initiation phase
+        dx_torso = sh_mid_x - hip_mid_x
+        dy_torso = hip_mid_y - sh_mid_y  # positive when shoulders above hips
+        torso_tilt = np.degrees(np.arctan2(dx_torso.abs(), dy_torso.abs()))
+        init_mask = df["phase"] == "initiation"
+        init_tilts = torso_tilt[init_mask].dropna()
+        early_inside_lean = float(init_tilts.mean()) if len(init_tilts) >= 5 else None
+
+        # 3e. Shoulder Stability — detrended shoulder midpoint x variation
+        sh_mid_x_norm = (sh_mid_x / w).dropna()
+        if len(sh_mid_x_norm) >= 10:
+            sh_baseline = sh_mid_x_norm.rolling(int(max(effective_fps, 3)), center=True, min_periods=3).mean()
+            sh_residual = (sh_mid_x_norm - sh_baseline).dropna()
+            shoulder_stability = float(sh_residual.std()) if len(sh_residual) >= 5 else None
+        else:
+            shoulder_stability = None
+
+        # 3f. Symmetry decomposition — split metrics by turn direction
+        # Follow-cam convention: rider's body to LEFT of frame = LEFT turn (rider's left)
+        # Compute baseline hip_x and classify each frame
+        hip_baseline_x = hip_mid_x.mean()
+        turn_side = pd.Series(["center"] * len(df), index=df.index)
+        # Use a small deadband around baseline to avoid noise near fall line
+        deadband = (hip_mid_x.max() - hip_mid_x.min()) * 0.10
+        dbg["turn_detection"]["deadband_value"] = round(float(deadband), 1)
+        turn_side[hip_mid_x < (hip_baseline_x - deadband)] = "left"
+        turn_side[hip_mid_x > (hip_baseline_x + deadband)] = "right"
+        df["turn_side"] = turn_side
+
+        def side_metric(values, side, min_n=5):
+            mask = df["turn_side"] == side
+            vals = values[mask].dropna()
+            return float(vals.mean()) if len(vals) >= min_n else None
+
+        # Per-side separation
+        sep_full = angular_diff(sh_s, hp_s)
+        sep_left = side_metric(sep_full, "left")
+        sep_right = side_metric(sep_full, "right")
+
+        # Per-side torso lean during initiation phase only
+        init_mask_side = (df["phase"] == "initiation")
+        torso_tilt_init = torso_tilt.copy()
+        torso_tilt_init[~init_mask_side] = np.nan
+        lean_left = side_metric(torso_tilt_init, "left")
+        lean_right = side_metric(torso_tilt_init, "right")
+
+        # Per-side shoulder stability (detrended residual std)
+        if len(sh_mid_x_norm) >= 10:
+            sh_residual_full = sh_mid_x_norm - sh_baseline
+            left_resid = sh_residual_full[df["turn_side"] == "left"].dropna()
+            right_resid = sh_residual_full[df["turn_side"] == "right"].dropna()
+            stab_left = float(left_resid.std()) if len(left_resid) >= 5 else None
+            stab_right = float(right_resid.std()) if len(right_resid) >= 5 else None
+        else:
+            stab_left = stab_right = None
+
+        # Metric sample diagnostics
+        total_frames = len(df)
+        sep_valid = sep_full.dropna()
+        init_frames = int(init_mask.sum())
+        sh_norm_valid = sh_mid_x_norm if len(sh_mid_x_norm) >= 10 else pd.Series([], dtype=float)
+
+        # Keypoint confidence heatmap — mean confidence per body part across all frames
+        kp_heatmap = {}
+        for kp_name in COCO_KEYPOINTS:
+            conf_col = f"{kp_name}_conf"
+            if conf_col in df.columns:
+                kp_heatmap[kp_name] = round(float(df[conf_col].mean()), 3)
+
+        # --- Overall confidence tier (debug only, never user-facing) ---
+        # Aggregates existing signals — no new analysis, no fake precision.
+        _mean_kp_conf = float(np.mean(list(kp_heatmap.values()))) if kp_heatmap else 0.0
+        _conf_scores = {
+            "detection_rate":  1 if detection_rate >= 0.75 else (0.5 if detection_rate >= 0.60 else 0),
+            "turn_quality":    1 if _turn_quality == "good" else (0.5 if _turn_quality == "warn" else 0),
+            "keypoint_conf":   1 if _mean_kp_conf >= 0.70 else (0.5 if _mean_kp_conf >= 0.55 else 0),
+            "turn_count":      1 if num_turns >= 4 else (0.5 if num_turns >= 2 else 0),
+            "body_geometry":   1 if body_geometry_quality == "ok" else (0.5 if body_geometry_quality == "warn" else 0),
+            "flat_terrain":    0 if flat_terrain_reason == "low_amplitude_warn" else 1,
+        }
+        _conf_avg = float(np.mean(list(_conf_scores.values())))
+        overall_confidence = "high" if _conf_avg >= 0.80 else ("medium" if _conf_avg >= 0.55 else "low")
+        dbg["overall_confidence"] = overall_confidence
+        dbg["confidence_scores"] = _conf_scores
+
+        # --- Cat-track diagnostic (debug only, no rejection) ---
+        # Low turn frequency + low lateral displacement = likely traverse or cat track.
+        # Both conditions required — either alone fires on legitimate slow/wide skiing.
+        _turns_per_second = num_turns / duration if duration > 0 else 0
+        cat_track_suspected = (
+            _turns_per_second < 0.4 and
+            hip_range_normalized < 1.5
+        )
+        dbg["cat_track_suspected"] = cat_track_suspected
+        dbg["cat_track_signals"] = {
+            "turns_per_second": round(_turns_per_second, 3),
+            "hip_range_normalized": round(hip_range_normalized, 3),
+        }
+
+        # --- Clip classification (debug only, no effect on pipeline) ---
+        if detection_rate < 0.60:
+            _clip_category = "low_detection"
+        elif _unique_riders >= 2:
+            _clip_category = "multi_rider"
+        elif cat_track_suspected:
+            _clip_category = "cat_track_suspected"
+        elif flat_terrain_flag:
+            _clip_category = "flat_section"
+        elif _unique_riders == 1:
+            _clip_category = "solo_rider"
+        else:
+            _clip_category = "unknown"
+        dbg["clip_category"] = _clip_category
+
+        dbg["metrics"] = {
+            "total_frames": total_frames,
+            "keypoint_confidence": kp_heatmap,
+            "separation": {
+                "valid_frames": len(sep_valid),
+                "valid_pct": round(len(sep_valid) / total_frames * 100, 1) if total_frames else 0,
+                "turns_used": num_turns,
+                "value": round(sep_angle, 2) if sep_angle else None,
+                "left": round(sep_left, 2) if sep_left else None,
+                "right": round(sep_right, 2) if sep_right else None,
+                "na_reason": "insufficient valid keypoints" if sep_angle is None else None,
+            },
+            "inside_lean": {
+                "valid_frames": len(init_tilts),
+                "valid_pct": round(len(init_tilts) / max(init_frames, 1) * 100, 1),
+                "value": round(early_inside_lean, 2) if early_inside_lean is not None else None,
+                "left": round(lean_left, 2) if lean_left is not None else None,
+                "right": round(lean_right, 2) if lean_right is not None else None,
+                "na_reason": "insufficient initiation frames" if early_inside_lean is None else None,
+            },
+            "shoulder_stability": {
+                "valid_frames": len(sh_norm_valid),
+                "valid_pct": round(len(sh_norm_valid) / total_frames * 100, 1) if total_frames else 0,
+                "value": round(shoulder_stability, 4) if shoulder_stability is not None else None,
+                "left": round(stab_left, 4) if stab_left is not None else None,
+                "right": round(stab_right, 4) if stab_right is not None else None,
+                "na_reason": "insufficient shoulder keypoints" if shoulder_stability is None else None,
+            },
+        }
+
+        # Asymmetry deltas (right - left). Positive means worse on right side.
+        def safe_delta(l, r):
+            if l is None or r is None:
+                return None
+            return r - l
+
+        asym_separation = safe_delta(sep_left, sep_right)
+        asym_lean = safe_delta(lean_left, lean_right)
+        asym_stability = safe_delta(stab_left, stab_right)
+
+        # 4. Fetch prior session from Supabase
+        prior_session = None
+        if user_id and sep_angle is not None:
+            try:
+                from supabase import create_client
+                sb = create_client(
+                    os.environ["SUPABASE_URL"],
+                    os.environ["SUPABASE_SERVICE_KEY"],
+                )
+                # Try to select new columns, fall back gracefully if they don't exist yet
+                try:
+                    result = sb.table("analyses")\
+                        .select("separation_angle, inside_lean, shoulder_stability, created_at")\
+                        .eq("user_id", user_id)\
+                        .not_.is_("separation_angle", "null")\
+                        .order("created_at", desc=True)\
+                        .limit(1)\
+                        .execute()
+                except Exception:
+                    result = sb.table("analyses")\
+                        .select("separation_angle, created_at")\
+                        .eq("user_id", user_id)\
+                        .not_.is_("separation_angle", "null")\
+                        .order("created_at", desc=True)\
+                        .limit(1)\
+                        .execute()
+                if result.data:
+                    row = result.data[0]
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+                    prior_session = {
+                        "date": dt.strftime("%b %-d"),
+                        "separation_angle": row.get("separation_angle"),
+                        "inside_lean": row.get("inside_lean"),
+                        "shoulder_stability": row.get("shoulder_stability"),
+                    }
+            except Exception as e:
+                print(f"Supabase lookup failed: {e}")
+
+        # 5. Claude coaching call
+        coaching_text = None
+        if sep_angle is not None:
+            try:
+                import anthropic as _anthropic
+                client = _anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+                sport_label = "skier" if sport == "ski" else "snowboarder"
+
+                # Build session block — overall + per-side
+                session_lines = [
+                    f"- Turns detected: {num_turns}",
+                    f"- Separation overall: {round(sep_angle, 1)}°",
+                ]
+                if sep_left is not None and sep_right is not None:
+                    session_lines.append(f"  - Left turns: {round(sep_left, 1)}° | Right turns: {round(sep_right, 1)}°")
+                if early_inside_lean is not None:
+                    session_lines.append(f"- Early-turn torso lean overall: {round(early_inside_lean, 1)}° (high = banking with upper body)")
+                    if lean_left is not None and lean_right is not None:
+                        session_lines.append(f"  - Left turns: {round(lean_left, 1)}° | Right turns: {round(lean_right, 1)}°")
+                if shoulder_stability is not None:
+                    session_lines.append(f"- Shoulder stability overall: {round(shoulder_stability, 4)} (lower = quieter upper body)")
+                    if stab_left is not None and stab_right is not None:
+                        session_lines.append(f"  - Left turns: {round(stab_left, 4)} | Right turns: {round(stab_right, 4)}")
+
+                # Identify the headline pattern
+                # Asymmetry thresholds: meaningful differences
+                ASYM_SEP_THRESHOLD = 4.0      # degrees
+                ASYM_LEAN_THRESHOLD = 4.0     # degrees
+                ASYM_STAB_THRESHOLD = 0.008   # relative units
+
+                asymmetries = []
+                if asym_separation is not None and abs(asym_separation) >= ASYM_SEP_THRESHOLD:
+                    worse_side = "right" if asym_separation < 0 else "left"
+                    asymmetries.append(("separation", abs(asym_separation), worse_side,
+                                        f"separation breaks down on {worse_side} turns"))
+                if asym_lean is not None and abs(asym_lean) >= ASYM_LEAN_THRESHOLD:
+                    worse_side = "right" if asym_lean > 0 else "left"
+                    asymmetries.append(("lean", abs(asym_lean), worse_side,
+                                        f"banking with upper body on {worse_side} turns"))
+                if asym_stability is not None and abs(asym_stability) >= ASYM_STAB_THRESHOLD:
+                    worse_side = "right" if asym_stability > 0 else "left"
+                    asymmetries.append(("stability", abs(asym_stability), worse_side,
+                                        f"upper body gets noisy on {worse_side} turns"))
+
+                # Sort by magnitude — pick the biggest asymmetry as the headline
+                asymmetries.sort(key=lambda x: x[1], reverse=True)
+                top_asymmetry = asymmetries[0] if asymmetries else None
+
+                # Store dominant asymmetry for debug
+                if top_asymmetry:
+                    _metric, _mag, _worse_side, _ = top_asymmetry
+                    dbg["dominant_asymmetry"] = {"metric": _metric, "side": _worse_side, "magnitude": round(_mag, 2)}
+                else:
+                    dbg["dominant_asymmetry"] = None
+
+                # Build history + change context
+                history_block = ""
+                change_summary = None
+                if prior_session:
+                    prior_sep = prior_session.get("separation_angle")
+                    prior_lean = prior_session.get("inside_lean")
+                    prior_stab = prior_session.get("shoulder_stability")
+                    hist_lines = [f"Previous session ({prior_session['date']}):"]
+                    if prior_sep is not None:
+                        hist_lines.append(f"- Separation: {round(prior_sep, 1)}°")
+                    if prior_lean is not None:
+                        hist_lines.append(f"- Early lean: {round(prior_lean, 1)}°")
+                    if prior_stab is not None:
+                        hist_lines.append(f"- Shoulder stability: {round(prior_stab, 4)}")
+                    history_block = "\n" + "\n".join(hist_lines) + "\n"
+
+                    # Find biggest meaningful change
+                    changes = []
+                    if prior_sep is not None:
+                        d = sep_angle - prior_sep
+                        if abs(d) >= 2.0:
+                            changes.append(("separation", d, "improved" if d > 0 else "regressed"))
+                    if prior_lean is not None and early_inside_lean is not None:
+                        d = early_inside_lean - prior_lean
+                        if abs(d) >= 2.0:
+                            changes.append(("lean", d, "more upper body banking" if d > 0 else "more stacked"))
+                    if prior_stab is not None and shoulder_stability is not None:
+                        d = shoulder_stability - prior_stab
+                        if abs(d) >= 0.005:
+                            changes.append(("stability", d, "noisier" if d > 0 else "quieter"))
+                    changes.sort(key=lambda c: abs(c[1]), reverse=True)
+                    change_summary = changes[0] if changes else "no_meaningful_change"
+
+                # Decide headline priority: change (if exists and significant) > asymmetry > baseline
+                if change_summary and change_summary != "no_meaningful_change":
+                    metric, delta, direction = change_summary
+                    headline_instruction = (
+                        f"HEADLINE PATTERN: {metric} has {direction} since last session. "
+                        f"Reference this change as the main observation. Don't list every metric — "
+                        f"focus on what changed and what it means."
+                    )
+                elif top_asymmetry:
+                    metric, magnitude, worse_side, description = top_asymmetry
+                    headline_instruction = (
+                        f"HEADLINE PATTERN: {description}. This is the one thing to coach. "
+                        f"Observation about the weaker side only — do not mention the stronger side."
+                    )
+                elif change_summary == "no_meaningful_change":
+                    headline_instruction = (
+                        "HEADLINE PATTERN: numbers are stable since last session. "
+                        "Acknowledge that honestly and pick one specific thing to focus on next run."
+                    )
+                else:
+                    headline_instruction = (
+                        "HEADLINE PATTERN: this is the baseline session. "
+                        "Describe what you saw plainly without grading it. "
+                        "Pick one specific habit to pay attention to next time."
+                    )
+
+                prompt = f"""You are a ski coach standing at the bottom of the lift. The skier is about to get on the chair. You have 10 seconds.
+
+{headline_instruction}
+
+INTERNAL DATA:
+{chr(10).join(session_lines)}
+{history_block}
+
+Rules:
+- Maximum 2 short sentences.
+- First sentence: the single biggest observation.
+- Second sentence (if needed): one thing to focus on next run.
+- One issue only. Never mention a second coaching point.
+- No numbers. No scores. No metric names. No technical language.
+- No filler. No introductions. No conclusions.
+- Talk like a human coach.
+
+Before responding, ask yourself: "If I said this to a skier at the bottom of the lift, would they immediately know what to work on next run?" If no, rewrite it."""
+
+                resp = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=120,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                import re
+                raw = resp.content[0].text
+                raw = re.sub(r'^\s*#+\s*', '', raw, flags=re.MULTILINE)
+                raw = re.sub(r'\*\*(.+?)\*\*', r'\1', raw)
+                raw = re.sub(r'\*(.+?)\*', r'\1', raw)
+                raw = re.sub(r'^\s*[-*\u2022]\s+', '', raw, flags=re.MULTILINE)
+                raw = re.sub(r'^\s*\d+\.\s+', '', raw, flags=re.MULTILINE)
+                raw = re.sub(r'\n{2,}', ' ', raw)
+                raw = re.sub(r'\s{2,}', ' ', raw)
+                coaching_text = raw.strip()
+                dbg["coaching"] = {
+                    "model": "claude-haiku-4-5-20251001",
+                    "prompt_version": "v4-10sec-final",
+                    "prior_session_used": prior_session is not None,
+                    "headline_pattern": headline_instruction.split(":")[1].strip()[:80] if ":" in headline_instruction else headline_instruction[:80],
+                    "measurements_sent": session_lines,
+                    "num_turns_in_prompt": num_turns,
+                    "full_prompt": prompt,
+                }
+            except Exception as e:
+                print(f"Claude call failed: {e}")
+                coaching_text = "Analysis complete — upload a clearer follow-cam clip for detailed coaching."
+                dbg["coaching"] = {"error": str(e)}
+
+        # 6. Store result in Supabase
+        if user_id and sep_angle is not None:
+            try:
+                from supabase import create_client
+                sb = create_client(
+                    os.environ["SUPABASE_URL"],
+                    os.environ["SUPABASE_SERVICE_KEY"],
+                )
+                row_data = {
+                    "user_id": user_id,
+                    "separation_angle": round(sep_angle, 1),
+                    "sport": sport,
+                    "coaching": coaching_text,
+                }
+                if early_inside_lean is not None:
+                    row_data["inside_lean"] = round(early_inside_lean, 1)
+                if shoulder_stability is not None:
+                    row_data["shoulder_stability"] = round(shoulder_stability, 4)
+                # Try insert with new columns, fall back to original if columns don't exist
+                try:
+                    sb.table("analyses").insert(row_data).execute()
+                except Exception as col_err:
+                    print(f"Insert with new columns failed ({col_err}), retrying with base columns")
+                    sb.table("analyses").insert({
+                        "user_id": user_id,
+                        "separation_angle": round(sep_angle, 1),
+                        "sport": sport,
+                        "coaching": coaching_text,
+                    }).execute()
+            except Exception as e:
+                print(f"Supabase insert failed: {e}")
+
+        dbg["pipeline_exit_reason"] = "success"
+        result = {
+            "status": "ok",
+            "sport": sport,
+            "coaching": coaching_text or "Analysis complete.",
+            "separation_angle": round(sep_angle, 1) if sep_angle else None,
+            "inside_lean": round(early_inside_lean, 1) if early_inside_lean is not None else None,
+            "shoulder_stability": round(shoulder_stability, 4) if shoulder_stability is not None else None,
+            "num_turns": num_turns,
+            "per_side": {
+                "separation": {"left": round(sep_left, 1) if sep_left is not None else None,
+                              "right": round(sep_right, 1) if sep_right is not None else None},
+                "inside_lean": {"left": round(lean_left, 1) if lean_left is not None else None,
+                               "right": round(lean_right, 1) if lean_right is not None else None},
+                "shoulder_stability": {"left": round(stab_left, 4) if stab_left is not None else None,
+                                      "right": round(stab_right, 4) if stab_right is not None else None},
+            },
+            "prior_session": prior_session,
+        }
+        if debug:
+            result["_debug"] = dbg
+        return result
+
+    finally:
+        os.unlink(video_path)
+
+
+# ---------------------------------------------------------------------------
+# Web endpoint — mounted FastAPI app via @modal.asgi_app()
+# ---------------------------------------------------------------------------
+
+@app.function(
+    image=image,
+    secrets=secrets,
+    timeout=300,
+    min_containers=0,
+)
+@modal.asgi_app()
+def fastapi_app():
+    from fastapi import FastAPI, File, Form, UploadFile
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
+
+    web_app = FastAPI()
+
+    web_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
+
+    @web_app.post("/analyze")
+    async def analyze_endpoint(
+        video: UploadFile = File(...),
+        sport: str = Form(default="auto"),
+        user_id: str = Form(default=None),
+        click_x: str = Form(default=None),
+        click_y: str = Form(default=None),
+        click_time: str = Form(default=None),
+        debug: str = Form(default="false"),
+    ):
+        video_bytes = await video.read()
+
+        if not video_bytes:
+            return JSONResponse({"error": "Empty video file"}, status_code=400)
+
+        if len(video_bytes) > 500 * 1024 * 1024:
+            return JSONResponse({"error": "File too large (max 500MB)"}, status_code=400)
+
+        if sport not in ("ski", "snowboard", "auto"):
+            sport = "auto"
+
+        # Parse click params (strings → floats, or None)
+        def _to_float(v):
+            try:
+                return float(v) if v not in (None, "", "null") else None
+            except Exception:
+                return None
+        cx = _to_float(click_x)
+        cy = _to_float(click_y)
+        ct = _to_float(click_time)
+        debug_mode = debug.lower() in ("true", "1", "yes")
+
+        try:
+            result = await analyze_video.remote.aio(video_bytes, sport, user_id, cx, cy, ct, debug_mode)
+        except Exception as e:
+            err_msg = str(e)
+            if "timeout" in err_msg.lower() or "timed out" in err_msg.lower():
+                return JSONResponse(
+                    {"status": "rejected", "reasons": ["Analysis timed out — try a shorter clip (under 30 seconds works best)."]},
+                    status_code=200,
+                )
+            return JSONResponse(
+                {"status": "rejected", "pipeline_exit_reason": "internal_error", "reasons": ["Something went wrong on our end. Try again."]},
+                status_code=200,
+            )
+
+        return JSONResponse(result)
+
+    return web_app
