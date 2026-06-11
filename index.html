@@ -1,11 +1,1047 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta http-equiv="refresh" content="0; url=/analyze">
-  <title>SnowLens</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SnowLens — Movement analysis for skiers and snowboarders</title>
+<meta name="description" content="You've felt every turn — but you've never seen one. Upload one clip and understand what your body actually did.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Saira+Condensed:wght@500;600;700&family=Saira:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* ════════════════════════════════════════════════════════════
+   * SNOWLENS — v18 · launch-ready
+   *
+   * Panel 2 body: "The movement hidden inside the turn."
+   * Credibility:  "Designed specifically for skiing and snowboarding."
+   * Outcome:      "See it. Understand it. Improve it."
+   *
+   * Hero image: snowlens-hero.jpg (320×400) — keep alongside this HTML.
+   * Proof SVG viewBox: 320×400. Re-anchor joints if image changes.
+   * ════════════════════════════════════════════════════════════ */
+
+  :root{
+    --bg:#090C10; --bg2:#0E1318; --surface:#121A22; --surface2:#18222C;
+    --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.12);
+    --ink:#EAF2F5; --dim:#8B99A6; --faint:#56636F;
+    --accent:#3FE0D4; --accent-deep:#11B3A7;
+    --warn:#FF6F61; --warn-soft:rgba(255,111,97,.14);
+    --good:#56E0A6; --good-soft:rgba(86,224,166,.13);
+    --amber:#F2B65A; --amber-soft:rgba(242,182,90,.13);
+    --disp:"Saira Condensed",sans-serif; --tech:"Saira",sans-serif; --ui:"Hanken Grotesk",sans-serif;
+    /* ─────────── DROP HERO IMAGE HERE ───────────
+       Replace the value of --hero-bg below with your image URL.
+       Final source: full-resolution IMG_1524 frame 265 (or your chosen frame).
+       Recommended aspect: 4/5 portrait.
+       ───────────────────────────────────────────── */
+    --hero-bg: url('hero.png.png');  /* keep the source JPEG alongside this HTML */
+
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:var(--ui); color:var(--ink); -webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(1400px 700px at 70% -10%, rgba(63,224,212,.025) 0%, transparent 60%),
+      linear-gradient(180deg,#05070a 0%, #0a0f15 70%, #060a0e 100%);
+    min-height:100vh; overflow-x:hidden;
+  }
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0; opacity:.32;
+    background:repeating-linear-gradient(115deg, rgba(255,255,255,.014) 0 1px, transparent 1px 76px);
+  }
+  body::after{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:1; opacity:.045; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* ===================== HEADER ===================== */
+  header{
+    position:relative; z-index:10; max-width:1240px; margin:0 auto;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:24px 28px;
+  }
+  .wordmark{font-family:var(--disp); font-weight:700; font-size:22px; letter-spacing:1.6px; display:inline-flex; align-items:center; gap:9px}
+  .wordmark .logo{height:28px; width:auto; color:var(--accent); flex-shrink:0; display:block}
+  .wordmark b{color:var(--accent)}
+  .nav{display:flex; align-items:center; gap:28px}
+  .nav a{font-size:14px; color:var(--dim); text-decoration:none; transition:.18s}
+  .nav a:hover{color:var(--ink)}
+  .btn-tiny{
+    font-family:var(--ui); font-weight:600; font-size:13.5px; color:#06121a;
+    background:var(--accent); border:none; padding:10px 18px; border-radius:999px;
+    cursor:pointer; transition:.2s; letter-spacing:.2px;
+  }
+  .btn-tiny:hover{filter:brightness(1.08); transform:translateY(-1px)}
+
+  /* ===================== HERO ===================== */
+  .hero{
+    position:relative; z-index:5; max-width:1240px; margin:0 auto;
+    min-height:calc(100vh - 72px);
+    padding:20px 28px 20px;
+    display:grid; grid-template-columns:.92fr 1.08fr; gap:44px; align-items:center;
+    overflow:hidden;
+  }
+  /* subtle ambient warmth near the image — quiet, not loud */
+  .hero::before{
+    content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+    background:
+      radial-gradient(ellipse 55% 70% at 75% 50%, rgba(63,224,212,.035) 0%, transparent 65%);
+  }
+  /* scan animation — dashes traveling along tracking ellipses */
+  @keyframes scan-dash{ to{ stroke-dashoffset:-120 } }
+
+  /* ---- left column ---- */
+  .col-copy{position:relative; z-index:5}
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:10px;
+    font-family:var(--tech); font-size:13px; font-weight:700; letter-spacing:2.4px; text-transform:uppercase;
+    color:var(--accent); padding:9px 18px;
+    background:rgba(63,224,212,.08); border:1px solid rgba(63,224,212,.25); border-radius:999px;
+    margin-bottom:14px;
+    opacity:0; transform:translateY(8px); animation:rise .7s ease .1s forwards;
+  }
+  .eyebrow::before{
+    content:""; width:6px; height:6px; border-radius:50%; background:var(--accent);
+    box-shadow:0 0 3px rgba(63,224,212,.5);
+  }
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+
+  h1.headline{
+    font-family:var(--disp); font-weight:600;
+    font-size:clamp(48px, 6vw, 80px); line-height:.94; letter-spacing:-.6px;
+    margin-bottom:22px;
+    opacity:0; transform:translateY(14px); animation:rise .8s cubic-bezier(.2,.7,.3,1) .2s forwards;
+  }
+  h1.headline .accent{color:var(--accent)}
+  h1.headline .strike{
+    display:inline-block; position:relative;
+  }
+  h1.headline .strike{color:var(--accent)}
+  h1.headline .strike::after{
+    content:""; position:absolute; left:0; right:-2%; bottom:-2px; height:4px;
+    background:var(--accent); transform:scaleX(0); transform-origin:left;
+    animation:strike .7s cubic-bezier(.6,0,.4,1) 1.3s forwards; border-radius:2px;
+  }
+  @keyframes strike{to{transform:scaleX(1)}}
+
+  .sub{
+    font-size:17.5px; line-height:1.62; color:var(--dim); max-width:500px;
+    margin-bottom:30px; letter-spacing:.1px;
+    opacity:0; transform:translateY(10px); animation:rise .7s ease .35s forwards;
+  }
+  .sub b{color:var(--ink); font-weight:600}
+
+  .props{
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:22px;
+    margin-bottom:40px;
+    opacity:0; transform:translateY(10px); animation:rise .7s ease .5s forwards;
+  }
+  .prop{
+    padding:20px 16px 18px; background:var(--surface);
+    border:1px solid var(--line); border-radius:14px;
+    position:relative; overflow:hidden;
+  }
+  .prop::before{
+    content:""; position:absolute; top:0; left:0; right:0; height:1px;
+    background:linear-gradient(90deg,transparent,rgba(63,224,212,.10),transparent);
+  }
+  .prop .pi{
+    width:32px; height:32px; border-radius:9px; background:rgba(63,224,212,.10);
+    border:1px solid rgba(63,224,212,.2); display:grid; place-items:center; margin-bottom:10px;
+  }
+  .prop .pi svg{width:16px; height:16px; stroke:var(--accent); fill:none; stroke-width:2}
+  .prop h3{font-family:var(--ui); font-weight:600; font-size:14px; line-height:1.25; margin-bottom:5px}
+  .prop p{font-size:13px; color:var(--dim); line-height:1.5}
+
+  /* ---- email capture ---- */
+  .cta-wrap{
+    opacity:0; transform:translateY(10px); animation:rise .7s ease .65s forwards;
+  }
+  form.capture{
+    display:flex; gap:8px; background:var(--surface);
+    border:1px solid var(--line2); border-radius:14px; padding:6px;
+    max-width:480px;
+    transition:border-color .2s, box-shadow .2s;
+  }
+  form.capture:focus-within{
+    border-color:rgba(63,224,212,.45);
+    box-shadow:0 0 0 4px rgba(63,224,212,.08);
+  }
+  form.capture input{
+    flex:1; background:transparent; border:none; outline:none;
+    padding:14px 14px; font-family:var(--ui); font-size:15px; color:var(--ink);
+  }
+  form.capture input::placeholder{color:var(--faint)}
+  form.capture button{
+    font-family:var(--ui); font-weight:700; font-size:14.5px; color:#06121a;
+    background:var(--accent); border:none; padding:0 22px; border-radius:10px; cursor:pointer;
+    transition:.18s; letter-spacing:.2px;
+    display:flex; align-items:center; gap:6px;
+  }
+  form.capture button:hover{filter:brightness(1.08); transform:translateY(-1px)}
+  form.capture button svg{width:15px; height:15px; stroke:#06121a; fill:none; stroke-width:2.4}
+
+  .trust{
+    margin-top:18px; display:flex; align-items:center; gap:14px;
+    font-size:12px; color:var(--faint); letter-spacing:.1px;
+  }
+  .trust .dot{width:5px; height:5px; border-radius:50%; background:var(--good); box-shadow:0 0 4px rgba(86,224,166,.5)}
+  .trust b{color:var(--dim); font-weight:600}
+
+
+  /* ===================== HERO RIGHT COLUMN — TRACKED SKIER ===================== */
+  .col-hero{
+    position:relative; z-index:5;
+    display:flex; align-items:center; justify-content:center;
+  }
+
+  .hero-card{
+    position:relative; width:100%; max-width:760px;
+    aspect-ratio: 4/5;
+    opacity:0; transform:translateY(20px) scale(.985);
+    animation: rise-hero 1s cubic-bezier(.2,.7,.3,1) .15s forwards;
+  }
+  @keyframes rise-hero{ to{ opacity:1; transform:none; } }
+
+  /* inner photo frame — only this clips */
+  .hero-frame{
+    position:absolute; inset:0;
+    border-radius:20px; overflow:hidden;
+    box-shadow:
+      0 50px 110px -25px rgba(0,0,0,.85),
+      0 0 0 1px rgba(255,255,255,.05),
+      0 0 100px -10px rgba(63,224,212,.14);
+  }
+
+  /* photo container — accepts the source image via --hero-bg */
+  .hero-photo{
+    position:absolute; inset:0;
+    background-color: var(--bg2);
+    background-image:
+      /* subtle diagonal scan lines so placeholder reads as a "media slot" */
+      repeating-linear-gradient(
+        115deg,
+        rgba(255,255,255,.012) 0 1px,
+        transparent 1px 28px
+      ),
+      /* corner vignette for film feel */
+      radial-gradient(ellipse 120% 80% at 50% 50%, transparent 40%, rgba(0,0,0,.35) 100%),
+      var(--hero-bg);
+    background-size: auto, auto, cover;
+    background-position: center, center, center;
+    filter: contrast(1.04) saturate(1.04);
+  }
+    /* gradient overlay — preserves bottom-edge readability for the callout */
+  .hero-photo::after{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:
+      linear-gradient(180deg, rgba(0,0,0,.20) 0%, rgba(0,0,0,0) 28%, rgba(0,0,0,0) 55%, rgba(6,10,14,.55) 100%);
+  }
+  /* placeholder affordance — only renders when --hero-bg is not set */
+  .hero-photo::before{
+    content:""; position:absolute; inset:0; pointer-events:none; z-index:0;
+    background:
+      linear-gradient(180deg, var(--surface) 0%, var(--bg2) 100%);
+    opacity: 1;
+  }
+  /* once a real image is set, hide the placeholder fill */
+  .hero-card[data-has-image="true"] .hero-photo::before{ display:none; }
+  .hero-placeholder-mark{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    z-index:1; pointer-events:none;
+    font-family:var(--tech); font-size:11px; font-weight:600;
+    letter-spacing:2.4px; text-transform:uppercase;
+    color:var(--faint); text-align:center;
+    display:flex; flex-direction:column; align-items:center; gap:14px;
+  }
+  .hero-card[data-has-image="true"] .hero-placeholder-mark{ display:none; }
+  .hero-placeholder-mark svg{
+    width:36px; height:36px; opacity:.45;
+    stroke:var(--faint); fill:none; stroke-width:1.4;
+  }
+  .hero-placeholder-mark .ratio{
+    font-size:10px; color:var(--faint); opacity:.7; letter-spacing:1.8px;
+  }
+
+  /* tiny corner wordmark — broadcast feel */
+  .hero-wm{
+    position:absolute; top:14px; left:16px; z-index:4;
+    font-family:var(--disp); font-weight:700; font-size:11.5px;
+    letter-spacing:1.8px; color:rgba(255,255,255,.78);
+    display:flex; align-items:center; gap:7px;
+    opacity:0; animation:fadein .7s ease 1s forwards;
+  }
+  .hero-wm::before{
+    content:""; width:5px; height:5px; border-radius:50%;
+    background:var(--accent); box-shadow:0 0 3px rgba(63,224,212,.55);
+  }
+  .hero-wm b{color:var(--accent)}
+
+  /* live tracking pill — top right */
+  .hero-track{
+    position:absolute; top:14px; right:14px; z-index:4;
+    font-family:var(--tech); font-weight:600; font-size:9.5px;
+    letter-spacing:1.6px; text-transform:uppercase;
+    padding:5px 9px 5px 8px;
+    background:rgba(6,10,14,.55); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    border:1px solid rgba(63,224,212,.25); border-radius:999px;
+    color:var(--accent);
+    display:inline-flex; align-items:center; gap:6px;
+    opacity:0; animation:fadein .7s ease 1.1s forwards;
+  }
+  .hero-track::before{
+    content:""; width:6px; height:6px; border-radius:50%; background:var(--accent);
+    box-shadow:0 0 3px rgba(63,224,212,.55);
+  }
+
+  /* minimal joint overlay — shoulders, hips, knees only */
+  .hero-joints{
+    position:absolute; inset:0; z-index:3; pointer-events:none;
+    width:100%; height:100%;
+  }
+  .hero-joints svg{ width:100%; height:100%; display:block; overflow:visible; }
+  .jline{
+    stroke: var(--accent);
+    stroke-width: 1.4;
+    fill: none;
+    stroke-linecap: round;
+    opacity: 0;
+    stroke-dasharray: 220;
+    stroke-dashoffset: 220;
+    filter: drop-shadow(0 0 3px rgba(63,224,212,.35));
+    animation: jline-draw 1.1s cubic-bezier(.6,0,.4,1) forwards;
+  }
+  .jline.l1{ animation-delay: 1.25s; }
+  .jline.l2{ animation-delay: 1.40s; }
+  .jline.l3{ animation-delay: 1.55s; }
+  .jline.l4{ animation-delay: 1.70s; }
+  .jline.l5{ animation-delay: 1.85s; }
+  .jline.l6{ animation-delay: 2.00s; }
+  @keyframes jline-draw{
+    to{ opacity:.55; stroke-dashoffset: 0; }
+  }
+  .jdot{
+    fill: var(--accent);
+    opacity: 0;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: jdot-pop .55s cubic-bezier(.2,.9,.3,1) forwards;
+    filter: drop-shadow(0 0 4px rgba(63,224,212,.55));
+  }
+  .jdot.d1{ animation-delay: 1.15s; }
+  .jdot.d2{ animation-delay: 1.25s; }
+  .jdot.d3{ animation-delay: 1.45s; }
+  .jdot.d4{ animation-delay: 1.55s; }
+  .jdot.d5{ animation-delay: 1.75s; }
+  .jdot.d6{ animation-delay: 1.85s; }
+  @keyframes jdot-pop{
+    0%   { opacity:0; transform:scale(0); }
+    60%  { opacity:1; transform:scale(1.45); }
+    100% { opacity:.92; transform:scale(1); }
+  }
+  /* outer halo around knees — the action point */
+  .jhalo{
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1;
+    opacity: 0;
+    animation: halo-pulse 2.4s ease-in-out infinite;
+    animation-delay: 2.2s;
+  }
+  @keyframes halo-pulse{
+    0%   { opacity:0;   transform:scale(.6); transform-box:fill-box; transform-origin:center; }
+    50%  { opacity:.35; transform:scale(1.0); transform-box:fill-box; transform-origin:center; }
+    100% { opacity:0;   transform:scale(1.5); transform-box:fill-box; transform-origin:center; }
+  }
+
+  /* coaching observation — lower-third broadcast lower-third */
+  .hero-insight{
+    position:absolute; left:18px; right:18px; bottom:18px; z-index:5;
+    padding:14px 16px 16px;
+    background:rgba(6,10,14,.84);
+    -webkit-backdrop-filter:blur(16px); backdrop-filter:blur(16px);
+    border:1px solid rgba(255,255,255,.08);
+    border-left:3px solid var(--warn);
+    border-radius:10px;
+    opacity:0; transform:translateY(8px);
+    animation: insight-rise .85s cubic-bezier(.2,.7,.3,1) 1.0s forwards;
+  }
+  @keyframes insight-rise{ to{ opacity:1; transform:none; } }
+  .hero-insight .lbl{
+    font-family:var(--tech); font-size:10px; font-weight:700;
+    letter-spacing:2.4px; text-transform:uppercase; color:var(--warn);
+    display:block; margin-bottom:7px;
+  }
+  .hero-insight .obs{
+    font-family:var(--ui); font-size:17px; line-height:1.42; color:var(--ink);
+    font-weight:500; display:block;
+  }
+  .hero-insight .obs em{
+    font-style:normal; color:var(--accent); font-weight:600;
+  }
+
+  /* small phone preview — supporting role */
+  .phone-mini{
+    position:absolute; bottom:-40px; right:-30px; z-index:6;
+    width:200px; background:var(--bg); border-radius:28px; overflow:hidden;
+    border:1px solid rgba(255,255,255,.06);
+    box-shadow:
+      0 0 0 7px #1a1f25,
+      0 0 0 8px #2a3138,
+      0 30px 70px -18px rgba(0,0,0,.82);
+    opacity:0; transform:translateY(16px) scale(.94);
+    animation: rise-phone .9s cubic-bezier(.2,.7,.3,1) 2.6s forwards;
+  }
+  @keyframes rise-phone{ to{ opacity:1; transform:none; } }
+  .phone-mini .pm-head{
+    padding:10px 13px 6px;
+    font-family:var(--disp); font-size:13px; font-weight:700; letter-spacing:.3px;
+    color:var(--ink); border-bottom:1px solid var(--line);
+  }
+  .phone-mini .pm-head small{
+    display:block; font-family:var(--tech); font-size:8px; font-weight:600;
+    letter-spacing:1.6px; text-transform:uppercase; color:var(--faint); margin-top:1px;
+  }
+  .phone-mini .pm-body{ padding:10px 13px 12px; }
+  .pm-row{ margin-bottom:8px; }
+  .pm-row:last-child{ margin-bottom:0; }
+  .pm-row .k{
+    font-family:var(--tech); font-size:7.5px; font-weight:700;
+    letter-spacing:1.6px; text-transform:uppercase;
+    display:block; margin-bottom:3px;
+  }
+  .pm-row.felt .k{ color:var(--faint); }
+  .pm-row.actual .k{ color:var(--warn); }
+  .pm-row .v{
+    font-family:var(--ui); font-size:11.5px; line-height:1.35; display:block;
+  }
+  .pm-row.felt .v{ color:var(--dim); font-style:italic; }
+  .pm-row.actual .v{ color:var(--ink); font-weight:500; }
+
+  
+  /* ===================== HOW SNOWLENS WORKS — PROOF SECTION ===================== */
+  .proof{
+    position:relative; z-index:5; max-width:1240px; margin:72px auto 0;
+    padding:72px 28px 56px;
+    border-top:1px solid var(--line);
+  }
+  .proof-eye{
+    font-family:var(--tech); font-size:11px; font-weight:600; letter-spacing:2.6px;
+    text-transform:uppercase; color:var(--accent); text-align:center; margin-bottom:14px;
+  }
+  .proof-h{
+    font-family:var(--disp); font-weight:600; font-size:clamp(34px, 4.2vw, 52px);
+    line-height:1.04; text-align:center; margin-bottom:14px; letter-spacing:-.4px;
+  }
+  .proof-sub{
+    text-align:center; color:var(--dim); font-size:17px; line-height:1.45;
+    max-width:480px; margin:0 auto 48px; letter-spacing:.2px;
+    font-style:italic; opacity:.85;
+  }
+  .proof-grid{
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:28px;
+    align-items:start;
+  }
+  .proof-panel{
+    position:relative;
+    display:flex; flex-direction:column;
+  }
+  .proof-frame{
+    position:relative; width:100%; aspect-ratio: 4/5;
+    border-radius:16px; overflow:hidden;
+    border:1px solid var(--line2);
+    box-shadow:
+      0 24px 60px -18px rgba(0,0,0,.6),
+      0 0 0 1px rgba(255,255,255,.03);
+  }
+  .proof-photo{
+    position:absolute; inset:0;
+    background-color: var(--bg2);
+    background-size: cover;
+    background-position: center;
+    filter: contrast(1.03) saturate(1.1);
+  }
+  .proof-photo::after{
+    content:""; position:absolute; inset:0;
+    background:
+      repeating-linear-gradient(115deg, rgba(255,255,255,.012) 0 1px, transparent 1px 28px),
+      radial-gradient(ellipse 120% 80% at 50% 50%, transparent 40%, rgba(0,0,0,.35) 100%);
+  }
+  .proof-photo::before{
+    content:""; position:absolute; inset:0; z-index:0; pointer-events:none;
+    background: linear-gradient(180deg, var(--surface) 0%, var(--bg2) 100%);
+  }
+  .proof-frame[data-has-image="true"] .proof-photo::before{ display:none; }
+  .proof-placeholder-mark{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    z-index:1; pointer-events:none;
+    font-family:var(--tech); font-size:9.5px; font-weight:600;
+    letter-spacing:2px; text-transform:uppercase;
+    color:var(--faint); text-align:center;
+    display:flex; flex-direction:column; align-items:center; gap:10px;
+  }
+  .proof-frame[data-has-image="true"] .proof-placeholder-mark{ display:none; }
+  .proof-placeholder-mark svg{
+    width:26px; height:26px; opacity:.4;
+    stroke:var(--faint); fill:none; stroke-width:1.4;
+  }
+  .proof-frame .label{
+    position:absolute; top:12px; left:12px; z-index:4;
+    font-family:var(--tech); font-weight:700; font-size:9px;
+    letter-spacing:1.9px; text-transform:uppercase;
+    padding:5px 9px 5px 9px;
+    background:rgba(6,10,14,.62);
+    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:4px;
+    color:var(--dim);
+  }
+  .proof-frame .label.live{
+    color:var(--accent);
+    border-color:rgba(63,224,212,.28);
+  }
+  .proof-frame .label.live::before{
+    content:""; display:inline-block; width:5px; height:5px; border-radius:50%;
+    background:var(--accent); box-shadow:0 0 3px rgba(63,224,212,.5);
+    margin-right:6px; vertical-align:1px;
+  }
+  .proof-frame .label.warn{
+    color:var(--warn);
+    border-color:rgba(255,111,97,.3);
+  }
+
+  /* panel 2 — tracking overlay */
+  .proof-joints{
+    position:absolute; inset:0; z-index:3; pointer-events:none;
+  }
+  .proof-joints svg{ width:100%; height:100%; display:block; overflow:visible; }
+
+  /* panel 3 — dim layer + insight card */
+  .proof-dim{
+    position:absolute; inset:0; z-index:2;
+    background:linear-gradient(180deg, rgba(6,10,14,.05) 0%, rgba(6,10,14,.55) 100%);
+  }
+  .proof-result{
+    position:absolute; left:14px; right:14px; bottom:14px; z-index:4;
+    padding:14px 15px 14px;
+    background:rgba(6,10,14,.84);
+    -webkit-backdrop-filter:blur(14px); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,255,255,.08);
+    border-left:2.5px solid var(--warn);
+    border-radius:8px;
+  }
+  .proof-result .row{ margin-bottom:9px; }
+  .proof-result .row:last-child{ margin-bottom:0; }
+  .proof-result .row .k{
+    font-family:var(--tech); font-size:8.5px; font-weight:700;
+    letter-spacing:2.1px; text-transform:uppercase;
+    display:block; margin-bottom:3px;
+  }
+  .proof-result .row.felt .k{ color:var(--faint); }
+  .proof-result .row.actual .k{ color:var(--warn); }
+  .proof-result .row .v{
+    font-family:var(--ui); font-size:13px; line-height:1.4; display:block;
+  }
+  .proof-result .row.felt .v{ color:var(--dim); font-style:italic; }
+  .proof-result .row.actual .v{ color:var(--ink); font-weight:500; }
+
+  /* caption beneath each panel */
+  .proof-cap{
+    padding:18px 4px 0;
+  }
+  .proof-cap .step{
+    font-family:var(--tech); font-size:10.5px; font-weight:700;
+    letter-spacing:2.4px; text-transform:uppercase; color:var(--accent);
+    margin-bottom:7px;
+  }
+  .proof-cap h3{
+    font-family:var(--disp); font-weight:600; font-size:22px; line-height:1.15;
+    margin-bottom:8px; letter-spacing:-.1px;
+  }
+  .proof-cap p{
+    color:var(--dim); font-size:14.5px; line-height:1.5;
+  }
+
+  /* connecting arrows between panels — flow indicator */
+  .proof-grid > .proof-panel:not(:last-child)::after{
+    content:""; position:absolute; top: 22%; right:-22px; z-index:5;
+    width:14px; height:14px;
+    border-top:1px solid rgba(63,224,212,.5);
+    border-right:1px solid rgba(63,224,212,.5);
+    transform:rotate(45deg);
+  }
+
+  /* tracking-state animation — same animations as before, reused */
+  .pjline{
+    stroke: var(--accent); stroke-width: 1.3; fill: none; stroke-linecap: round;
+    opacity:.48;
+  }
+  .pjdot{
+    fill: var(--accent); opacity:.82;
+    filter: drop-shadow(0 0 1.5px rgba(63,224,212,.4));
+  }
+  /* .pjhalo removed — no persistent pulses in proof */
+
+  /* ===================== HOW IT WORKS ===================== */
+  .how{
+    position:relative; z-index:5; max-width:1100px; margin:60px auto 0;
+    padding:60px 28px 40px;
+    border-top:1px solid var(--line);
+  }
+  .how-eye{
+    font-family:var(--tech); font-size:11px; font-weight:600; letter-spacing:2.6px; text-transform:uppercase;
+    color:var(--accent); text-align:center; margin-bottom:14px;
+  }
+  .how-h{
+    font-family:var(--disp); font-weight:600; font-size:clamp(34px, 4vw, 48px); line-height:1.05;
+    text-align:center; margin-bottom:48px; letter-spacing:-.3px;
+  }
+  .how-grid{
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:24px;
+  }
+  .step{
+    position:relative;
+    padding:28px 24px 30px;
+    background:linear-gradient(180deg, var(--surface) 0%, var(--bg2) 100%);
+    border:1px solid var(--line); border-radius:18px;
+    overflow:hidden;
+  }
+  .step::before{
+    content:""; position:absolute; top:0; left:0; right:0; height:1px;
+    background:linear-gradient(90deg, transparent, rgba(63,224,212,.18), transparent);
+  }
+  .step .num{
+    font-family:var(--disp); font-weight:700; font-size:54px; color:var(--accent);
+    line-height:.85; opacity:.85; margin-bottom:8px;
+  }
+  .step h3{font-family:var(--disp); font-weight:600; font-size:22px; margin-bottom:8px}
+  .step p{font-size:14px; color:var(--dim); line-height:1.55}
+  .step .meta{
+    margin-top:14px; padding-top:12px; border-top:1px dashed var(--line);
+    font-family:var(--tech); font-size:10.5px; font-weight:600; letter-spacing:1.4px;
+    text-transform:uppercase; color:var(--faint);
+  }
+  .step .meta b{color:var(--accent)}
+
+
+  /* expertise tagline — small, quiet, between value props and footer */
+  .credibility{
+    max-width:900px; margin:0 auto;
+    padding:0 28px 56px;
+    text-align:center;
+  }
+  .credibility p{
+    font-family:var(--disp); font-weight:500;
+    font-size:13.5px; letter-spacing:1.4px; text-transform:uppercase;
+    color:var(--faint);
+  }
+
+  /* ===================== FOOTER ===================== */
+  footer{
+    position:relative; z-index:5; max-width:1240px; margin:60px auto 0;
+    padding:28px 28px 36px;
+    border-top:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:18px;
+    font-size:12.5px; color:var(--faint);
+  }
+  footer .links{display:flex; gap:24px}
+  footer a{color:var(--dim); text-decoration:none; transition:.18s}
+  footer a:hover{color:var(--ink)}
+
+  /* ===================== STAGGERED RISE ===================== */
+  @keyframes rise{to{opacity:1; transform:none}}
+  @keyframes fadein{to{opacity:1}}
+
+  /* ===================== RESPONSIVE ===================== */
+  @media (max-width:980px){
+    .hero{grid-template-columns:1fr; gap:40px; padding:30px 24px 80px}
+    .proof{padding:60px 24px 40px; margin-top:40px}
+    .proof-grid{grid-template-columns:1fr; gap:36px}
+    .proof-grid > .proof-panel:not(:last-child)::after{
+      top:auto; right:50%; bottom:-22px;
+      transform:translateX(50%) rotate(135deg);
+    }
+    .proof-cap{padding-top:14px}
+    .proof-cap h3{font-size:20px}
+    header{padding:20px 22px}
+    .nav a:not(.btn-tiny){display:none}
+    h1.headline{font-size:clamp(40px, 9vw, 60px)}
+    .props{grid-template-columns:1fr; gap:10px}
+    .prop{display:flex; gap:14px; align-items:flex-start; padding:14px}
+    .prop .pi{margin-bottom:0}
+    .hero-card{max-width:100%}
+    .hero-insight{left:14px; right:14px; bottom:14px; padding:13px 14px 14px}
+    .hero-insight .obs{font-size:14px}
+  }
+  @media (max-width:480px){
+    form.capture{flex-direction:column; padding:8px}
+    form.capture button{padding:14px; justify-content:center}
+    .hero-insight{left:12px; right:12px; bottom:12px; padding:11px 13px 12px}
+    .hero-insight .lbl{font-size:9px;}
+    .hero-insight .obs{font-size:13px}
+    .hero-wm{font-size:10px; top:10px; left:12px}
+  }
+
+
+  /* proof closing line — completes the arc with the 'improve' beat */
+  .proof-close{
+    margin:56px auto 0; max-width:520px;
+    text-align:center;
+    font-family:var(--disp); font-weight:500;
+    font-size:17px; line-height:1.4; letter-spacing:.2px;
+    color:var(--ink);
+    font-style:italic;
+    opacity:.78;
+  }
+
+  /* trust sub-line — quiet expertise signal */
+  .trust-sub{
+    font-size:11.5px; color:var(--faint); letter-spacing:.25px;
+    margin-top:7px; padding-left:19px; /* align with trust text past the dot */
+    line-height:1.4;
+  }
+
+  /* ===================== SECONDARY CTA ===================== */
+  .cta2{
+    position:relative; z-index:5; max-width:1240px; margin:0 auto;
+    padding:84px 28px 80px;
+    border-top:1px solid var(--line);
+    text-align:center;
+  }
+  .cta2-h{
+    font-family:var(--disp); font-weight:600;
+    font-size:clamp(28px, 3.4vw, 40px); line-height:1.08; letter-spacing:-.3px;
+    margin-bottom:14px;
+  }
+  .cta2-sub{
+    color:var(--dim); font-size:15.5px; line-height:1.6; letter-spacing:.1px;
+    max-width:560px; margin:0 auto 28px;
+  }
+  .cta2-form{
+    display:flex; align-items:center; gap:0;
+    max-width:480px; margin:0 auto;
+    background:var(--surface); border:1px solid var(--line2); border-radius:12px;
+    padding:6px; transition:border-color .2s, box-shadow .2s;
+  }
+  .cta2-form:focus-within{
+    border-color:rgba(63,224,212,.4);
+    box-shadow:0 0 0 4px rgba(63,224,212,.08);
+  }
+  .cta2-form input{
+    flex:1; background:transparent; border:none; outline:none;
+    color:var(--ink); font-family:var(--ui); font-size:15px;
+    padding:11px 14px;
+  }
+  .cta2-form input::placeholder{color:var(--faint)}
+  .cta2-form button{
+    font-family:var(--ui); font-weight:600; font-size:14px; color:#06121a;
+    background:var(--accent); border:none; padding:12px 20px; border-radius:8px;
+    cursor:pointer; transition:.2s; letter-spacing:.2px;
+    display:flex; align-items:center; gap:8px;
+    white-space:nowrap;
+  }
+  .cta2-form button:hover{filter:brightness(1.08); transform:translateY(-1px)}
+  .cta2-form button svg{width:14px; height:14px; stroke:currentColor; stroke-width:2; fill:none}
+  .cta2-support{
+    margin-top:20px; font-size:12.5px; color:var(--faint); letter-spacing:.1px;
+  }
+  .cta2-support a{color:var(--dim); text-decoration:none; transition:.18s; border-bottom:1px solid rgba(255,255,255,.08)}
+  .cta2-support a:hover{color:var(--ink); border-bottom-color:rgba(255,255,255,.25)}
+
+  @media (max-width:560px){
+    .cta2{padding:60px 24px 56px}
+    .cta2-form{flex-direction:column; padding:8px; gap:6px}
+    .cta2-form input{width:100%}
+    .cta2-form button{width:100%; justify-content:center; padding:14px}
+  }
+
+
+  /* outcome statement — one line, between CTA and value props */
+  .outcome{
+    text-align:center; max-width:600px; margin:0 auto;
+    padding:0 28px 36px;
+    font-size:14.5px; color:var(--dim); letter-spacing:.2px; line-height:1.5;
+  }
+
+  /* ===================== VALUE PROP STRIP ===================== */
+  .value-props{
+    max-width:920px; margin:0 auto; padding:0 40px 72px;
+    display:grid; grid-template-columns:repeat(2,1fr); gap:24px;
+  }
+  @media (max-width:720px){
+    .value-props{grid-template-columns:1fr; gap:14px; padding:0 24px 56px}
+  }
+
+</style>
 </head>
 <body>
-  <script>window.location.href = '/analyze';</script>
+
+<header>
+  <div class="wordmark"><svg class="logo" viewBox="6 12 98 76" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 69 Q50 83 95 49" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><path d="M40 53 L38 64 L33 73.08" fill="none" stroke="currentColor" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M48 52 L53 63 L52 70.75" fill="none" stroke="currentColor" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M40 53 L48 52" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M44 34 L44 52.5" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M42.60 30.50 L44 34" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M44 34 L60 37" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="40" cy="24" r="7" fill="none" stroke="currentColor" stroke-width="4.6"/><circle cx="40" cy="53" r="3" fill="currentColor"/><circle cx="48" cy="52" r="3" fill="currentColor"/><circle cx="38" cy="64" r="2.76" fill="currentColor"/><circle cx="53" cy="63" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>SNOW<b>LENS</b></div>
+  <nav class="nav">
+    <a href="#how">How it works</a>
+    <a href="#emailForm" class="btn-tiny">Get early access</a>
+  </nav>
+</header>
+
+<section class="hero">
+  <!-- ========== LEFT COLUMN ========== -->
+  <div class="col-copy">
+
+    <h1 class="headline">
+      You've felt every turn.<br>
+      <span class="strike">You've never actually seen one.</span>
+    </h1>
+
+    <p class="sub">
+      Upload one clip. Understand what your body actually did.
+    </p>
+
+    <!-- props moved below hero — first screen is hook + phone + CTA only -->
+
+    <div class="cta-wrap">
+      <!-- TO ACTIVATE: replace YOUR_FORM_ID below with your Formspree form ID (get it at formspree.io) -->
+      <form class="capture" id="emailForm" action="https://formspree.io/f/mpqnepvb" method="POST">
+        <input type="email" name="email" placeholder="your@email.com" required>
+        <button type="submit">
+          <span class="btn-label">Get early access</span>
+          <svg viewBox="0 0 24 24"><line x1="4" y1="12" x2="18" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>
+        </button>
+      </form>
+      <div class="trust">
+        <span class="dot"></span>
+        <span id="trustText"><b>Built by skiers and snowboarders.</b> Beta opens Winter 2026–27.</span>
+      </div>
+      <p class="trust-sub">Designed specifically for snow sports movement.</p>
+    </div>
+  </div>
+
+  <!-- ========== RIGHT COLUMN — TRACKED SKIER (visual hero) ========== -->
+  <div class="col-hero">
+
+    <div class="hero-card" data-has-image="true">
+      <div class="hero-frame">
+        <div class="hero-photo" aria-hidden="true"></div>
+
+        <!-- placeholder mark — disappears once data-has-image="true" -->
+        <div class="hero-placeholder-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1.5"/><circle cx="12" cy="12" r="3.5"/><path d="M8 5l1.2-1.8h5.6L16 5"/></svg>
+          <span>Hero source image</span>
+          <span class="ratio">4 : 5 · drop into --hero-bg</span>
+        </div>
+
+        <div class="hero-wm">SNOW<b>LENS</b></div>
+
+        <!-- one coaching callout — the OUTCOME, not the tracking -->
+        <div class="hero-insight">
+          <span class="lbl">What actually happened</span>
+          <span class="obs">You thought you were centered.<br><em>Your pressure moved inside earlier than you realized.</em></span>
+        </div>
+      </div><!-- /.hero-frame -->
+
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ========== HOW SNOWLENS WORKS — visual tech proof ========== -->
+<section class="proof" id="how">
+  <div class="proof-eye">How it works</div>
+  <h2 class="proof-h">From raw clip to clear coaching.</h2>
+  <p class="proof-sub">Every turn leaves clues.</p>
+
+  <div class="proof-grid">
+
+    <!-- PANEL 1: original frame -->
+    <div class="proof-panel">
+      <div class="proof-frame" data-has-image="true">
+        <div class="proof-photo" aria-hidden="true" style="background-image:url('panel1.png.png'); background-size:cover; background-position:center;"></div>
+        <div class="proof-placeholder-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1.5"/><circle cx="12" cy="12" r="3.5"/><path d="M8 5l1.2-1.8h5.6L16 5"/></svg>
+          <span>Frame · raw</span>
+        </div>
+        <div class="label">Raw clip</div>
+      </div>
+      <div class="proof-cap">
+        <div class="step">01 · Upload</div>
+        <h3>Your clip, untouched.</h3>
+        <p>One clip is enough.</p>
+      </div>
+    </div>
+
+    <!-- PANEL 2: tracking overlay -->
+    <div class="proof-panel">
+      <div class="proof-frame" data-has-image="true">
+        <div class="proof-photo" aria-hidden="true" style="background-image:url('panel2.png.png'); background-size:cover; background-position:center;"></div>
+        <div class="proof-placeholder-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1.5"/><circle cx="12" cy="12" r="3.5"/><path d="M8 5l1.2-1.8h5.6L16 5"/></svg>
+          <span>Frame · analyzed</span>
+        </div>
+        <div class="proof-joints" aria-hidden="true">
+          <svg viewBox="0 0 320 400" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+            <!-- shoulder line (R_sh -> L_sh) -->
+            <line class="pjline" x1="200" y1="90" x2="218" y2="85"/>
+            <!-- L torso (L_sh -> L_hip) -->
+            <line class="pjline" x1="218" y1="85" x2="218" y2="190"/>
+            <!-- R torso (R_sh -> R_hip) -->
+            <line class="pjline" x1="200" y1="90" x2="190" y2="185"/>
+            <!-- pelvis line (R_hip -> L_hip) -->
+            <line class="pjline" x1="190" y1="185" x2="218" y2="190"/>
+            <!-- L femur (L_hip -> L_knee) -->
+            <line class="pjline" x1="218" y1="190" x2="215" y2="255"/>
+            <!-- R femur (R_hip -> R_knee) -->
+            <line class="pjline" x1="190" y1="185" x2="180" y2="245"/>
+            <!-- 6 joint dots -->
+            <circle class="pjdot" cx="200" cy="90" r="4"/>
+            <circle class="pjdot" cx="218" cy="85" r="4"/>
+            <circle class="pjdot" cx="190" cy="185" r="4"/>
+            <circle class="pjdot" cx="218" cy="190" r="4"/>
+            <circle class="pjdot" cx="180" cy="245" r="4.5"/>
+            <circle class="pjdot" cx="215" cy="255" r="4.5"/>
+          </svg>
+        </div>
+        <div class="label live">Movement analysis</div>
+      </div>
+      <div class="proof-cap">
+        <div class="step">02 · Analyze</div>
+        <h3>See the movement behind the turn.</h3>
+        <p>The movement hidden inside the turn.</p>
+      </div>
+    </div>
+
+    <!-- PANEL 3: coaching insight -->
+    <div class="proof-panel">
+      <div class="proof-frame" data-has-image="true">
+        <div class="proof-photo" aria-hidden="true" style="background-image:url('panel3.png.png'); background-size:cover; background-position:center; filter:brightness(0.45) contrast(1.05);"></div>
+        <div class="proof-placeholder-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1.5"/><circle cx="12" cy="12" r="3.5"/><path d="M8 5l1.2-1.8h5.6L16 5"/></svg>
+          <span>Frame · revealed</span>
+        </div>
+        <div class="proof-dim" aria-hidden="true"></div>
+        <div class="label warn">Coaching insight</div>
+        <div class="proof-result">
+          <div class="row felt">
+            <span class="k">You felt</span>
+            <span class="v">Balanced through the turn.</span>
+          </div>
+          <div class="row actual">
+            <span class="k">Actually</span>
+            <span class="v">Your upper body is banking into your left turns — keep your torso quiet and let your legs do the work.</span>
+          </div>
+        </div>
+      </div>
+      <div class="proof-cap">
+        <div class="step">03 · Reveal</div>
+        <h3>What you couldn't feel.</h3>
+        <p>Coaching based on what your body actually did.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <p class="proof-close">Improve faster by seeing what you couldn't feel.</p>
+</section>
+
+
+<!-- ========== SECONDARY CTA — restrained conversion block ========== -->
+<section class="cta2">
+  <h2 class="cta2-h">Ready to see what actually happened?</h2>
+  <p class="cta2-sub">Beta opens Winter 2026–27. One clip is all you need.</p>
+  <form class="cta2-form" id="emailForm2" action="https://formspree.io/f/mpqnepvb" method="POST">
+    <input type="email" name="email" placeholder="your@email.com" required>
+    <button type="submit">
+      <span class="btn-label">Get early access</span>
+      <svg viewBox="0 0 24 24"><line x1="4" y1="12" x2="18" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>
+    </button>
+  </form>
+  <div class="cta2-support">Questions? <a href="mailto:getsnowlens@gmail.com">getsnowlens@gmail.com</a></div>
+</section>
+
+
+<!-- ========== WHY IT WORKS STRIP ========== -->
+<p class="outcome">See it. Understand it. Improve it.</p>
+<section class="value-props">
+  <div class="prop">
+    <div class="pi"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2.5"/><circle cx="12" cy="12.5" r="3.5"/><path d="M8 6l1.5-2.5h5L16 6"/></svg></div>
+    <div><h3>See what you couldn't feel.</h3><p>The habits invisible from the inside.</p></div>
+  </div>
+  <div class="prop">
+    <div class="pi"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-11"/></svg></div>
+    <div><h3>Improve faster with clearer feedback.</h3><p>Understand what changed and why.</p></div>
+  </div>
+</section>
+
+
+<!-- Expertise tagline — quiet credibility before footer -->
+<section class="credibility">
+  <p>Designed specifically for skiing and snowboarding.</p>
+</section>
+
+
+<footer>
+  <div class="wordmark"><svg class="logo" viewBox="6 12 98 76" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 69 Q50 83 95 49" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><path d="M40 53 L38 64 L33 73.08" fill="none" stroke="currentColor" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M48 52 L53 63 L52 70.75" fill="none" stroke="currentColor" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M40 53 L48 52" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M44 34 L44 52.5" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M42.60 30.50 L44 34" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M44 34 L60 37" fill="none" stroke="currentColor" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="40" cy="24" r="7" fill="none" stroke="currentColor" stroke-width="4.6"/><circle cx="40" cy="53" r="3" fill="currentColor"/><circle cx="48" cy="52" r="3" fill="currentColor"/><circle cx="38" cy="64" r="2.76" fill="currentColor"/><circle cx="53" cy="63" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>SNOW<b>LENS</b></div>
+  <div class="links">
+    <a href="/privacy.html">Privacy</a>
+    <a href="/terms.html">Terms</a>
+    <a href="mailto:getsnowlens@gmail.com">getsnowlens@gmail.com</a>
+  </div>
+  <div>© 2026 · getsnowlens.com</div>
+</footer>
+
+<script>
+  // Header CTA — smooth scroll + focus the email input
+  document.querySelectorAll('a[href="#emailForm"]').forEach(link => {
+    link.addEventListener('click', () => {
+      setTimeout(() => {
+        const input = document.querySelector('#emailForm input[name="email"]');
+        if (input) input.focus({ preventScroll: true });
+      }, 650);
+    });
+  });
+
+  // Email signup — AJAX submit to Formspree, keeps user on page, shows confirmation
+  (function(){
+    const forms = [document.getElementById('emailForm'), document.getElementById('emailForm2')].filter(Boolean);
+    if (!forms.length) return;
+    forms.forEach(form => form.addEventListener('submit', async function(e){
+      e.preventDefault();
+      const btn = form.querySelector('button');
+      const lbl = btn.querySelector('.btn-label');
+      const trust = document.getElementById('trustText');
+      const email = form.querySelector('input[name="email"]').value;
+      const action = form.getAttribute('action');
+
+      // If form ID is still the placeholder, show a friendly inline confirmation only
+      if (action.includes('YOUR_FORM_ID')) {
+        lbl.textContent = "You're in ✓";
+        btn.disabled = true;
+        if (trust) trust.innerHTML = '<b>You\u2019re on the list.</b> First breakdowns ship Winter 2026–27.';
+        return;
+      }
+
+      btn.disabled = true;
+      lbl.textContent = 'Submitting…';
+      try {
+        const res = await fetch(action, {
+          method: 'POST',
+          headers: {'Accept':'application/json','Content-Type':'application/json'},
+          body: JSON.stringify({email: email})
+        });
+        if (res.ok) {
+          lbl.textContent = "You're in ✓";
+          if (trust) trust.innerHTML = '<b>You\u2019re on the list.</b> First breakdowns ship Winter 2026–27.';
+        } else {
+          lbl.textContent = 'Try again';
+          btn.disabled = false;
+        }
+      } catch (err) {
+        lbl.textContent = 'Try again';
+        btn.disabled = false;
+      }
+    }));
+  })();
+</script>
 </body>
 </html>
