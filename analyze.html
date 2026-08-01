@@ -92,7 +92,6 @@
     .title-block h1 em { color: var(--cyan); font-style: normal; text-decoration: underline; text-decoration-color: var(--cyan); text-underline-offset: 4px; }
     .title-block p { font-size: 15px; color: var(--text-muted); line-height: 1.65; max-width: 520px; }
 
-    /* Compact upload zone — row layout, not giant box */
     .upload-zone {
       border: 1px solid var(--border-lit);
       background: var(--surface);
@@ -134,7 +133,6 @@
     .upload-text p { font-size: 12px; color: var(--text-muted); }
     .file-selected { font-size: 12px; color: var(--cyan); font-weight: 500; margin-top: 2px; }
 
-    /* Preview flush below upload zone, same width, no gap */
     .preview-wrapper {
       display: none;
       border: 1px solid var(--border-lit);
@@ -165,7 +163,6 @@
       display: none;
       z-index: 5;
     }
-    /* Always fully visible once set — no fading */
     .click-marker.set { display: block; opacity: 1 !important; }
 
     .preview-instruction {
@@ -335,7 +332,7 @@
   <div id="state-idle">
     <div class="title-block">
       <h1>Analyze<br>your <em>clip</em></h1>
-      <p>Film from behind the skier, close enough to see their whole body. 10–20 seconds with 3–5 turns works best. Avoid lift rides and flat sections.</p>
+      <p>Film from behind the skier, close enough to see their whole body. 10-20 seconds with 3-5 turns works best. Avoid lift rides and flat sections.</p>
     </div>
 
     <div class="upload-zone" id="upload-zone">
@@ -345,7 +342,7 @@
       </svg>
       <div class="upload-text">
         <h2>Drop your clip here</h2>
-        <p>MP4 or MOV · filmed from behind · max 500MB</p>
+        <p>MP4 or MOV - filmed from behind - max 500MB</p>
         <div class="file-selected" id="file-name-display"></div>
       </div>
     </div>
@@ -357,11 +354,11 @@
     <div class="preview-instruction" id="preview-instruction">Tap the skier you want analyzed</div>
 
     <div class="requirements">
-      <p><strong>Requirements:</strong> Camera behind the rider · skiing or boarding only · clip ≥ 4 seconds · at least 2 turns</p>
+      <p><strong>Requirements:</strong> Camera behind the rider - skiing or boarding only - clip at least 4 seconds - at least 2 turns</p>
     </div>
 
     <button class="submit-btn" id="submit-btn" onclick="submitVideo()" disabled>
-      Analyze clip →
+      Analyze clip
     </button>
   </div>
 
@@ -384,7 +381,7 @@
       </div>
       <div class="meta-row" id="meta-row"></div>
       <hr class="divider">
-      <button class="again-btn" onclick="resetPage()">← Analyze another clip</button>
+      <button class="again-btn" onclick="resetPage()">Analyze another clip</button>
     </div>
   </div>
 
@@ -394,59 +391,76 @@
       <h3>Clip rejected</h3>
       <p id="error-text"></p>
     </div>
-    <button class="again-btn" onclick="resetPage()">← Try another clip</button>
+    <button class="again-btn" onclick="resetPage()">Try another clip</button>
   </div>
 
   <div class="footer-note">
-    SnowLens internal test build · not for public distribution<br>
-    <a href="/">← Back to main site</a>
+    SnowLens internal test build - not for public distribution<br>
+    <a href="/">Back to main site</a>
   </div>
 
 </div>
 
 <script>
-  const MODAL_URL = 'https://d3lynch26-stack--snowlens-v2-fastapi-app.modal.run/analyze';
-  let selectedFile = null;
-  let clickData = { x: null, y: null, time: null };
+  var MODAL_URL = 'https://d3lynch26-stack--snowlens-v2-fastapi-app.modal.run/analyze';
+  var selectedFile = null;
+  var clickData = { x: null, y: null, time: null };
 
   function init() { setState('idle'); }
 
-  // Wire click-to-select once on DOM ready
-  const preview = document.getElementById('video-preview');
-  const marker = document.getElementById('click-marker');
-  const instruction = document.getElementById('preview-instruction');
+  var preview = document.getElementById('video-preview');
+  var marker = document.getElementById('click-marker');
+  var instruction = document.getElementById('preview-instruction');
 
-  preview.addEventListener('click', (e) => {
-    // Always pause on tap — user is selecting, not scrubbing
+  preview.addEventListener('click', function(e) {
     if (!preview.paused) preview.pause();
 
-    const rect = preview.getBoundingClientRect();
-    const xPct = (e.clientX - rect.left) / rect.width;
-    const yPct = (e.clientY - rect.top) / rect.height;
-    clickData.x = Math.max(0, Math.min(1, xPct));
-    clickData.y = Math.max(0, Math.min(1, yPct));
+    var rect = preview.getBoundingClientRect();
+
+    var videoRatio = preview.videoWidth / preview.videoHeight;
+    var elemRatio = rect.width / rect.height;
+    var renderWidth, renderHeight, offsetX, offsetY;
+    if (elemRatio > videoRatio) {
+      renderHeight = rect.height;
+      renderWidth = rect.height * videoRatio;
+      offsetX = (rect.width - renderWidth) / 2;
+      offsetY = 0;
+    } else {
+      renderWidth = rect.width;
+      renderHeight = rect.width / videoRatio;
+      offsetX = 0;
+      offsetY = (rect.height - renderHeight) / 2;
+    }
+
+    var xPct = (e.clientX - rect.left - offsetX) / renderWidth;
+    var yPct = (e.clientY - rect.top - offsetY) / renderHeight;
+    xPct = Math.max(0, Math.min(1, xPct));
+    yPct = Math.max(0, Math.min(1, yPct));
+
+    clickData.x = xPct;
+    clickData.y = yPct;
     clickData.time = preview.currentTime;
 
-    marker.style.left = (xPct * 100) + '%';
-    marker.style.top = (yPct * 100) + '%';
-    marker.classList.add('set');   // always fully visible, no fade logic
+    var markerLeftPct = ((e.clientX - rect.left) / rect.width) * 100;
+    var markerTopPct = ((e.clientY - rect.top) / rect.height) * 100;
+    marker.style.left = markerLeftPct + '%';
+    marker.style.top = markerTopPct + '%';
+    marker.classList.add('set');
 
-    instruction.textContent = 'Locked — tap Analyze when ready';
+    instruction.textContent = 'Locked -- tap Analyze when ready';
     instruction.classList.add('done');
     document.getElementById('submit-btn').disabled = false;
   });
 
   function showPreview(file) {
-    // Reset
     marker.classList.remove('set');
     instruction.classList.remove('done');
     instruction.textContent = 'Tap the skier you want analyzed';
     clickData = { x: null, y: null, time: null };
 
-    // Load but do NOT autoplay
     if (preview.src) URL.revokeObjectURL(preview.src);
     preview.src = URL.createObjectURL(file);
-    preview.load(); // loads metadata, shows first frame, does not play
+    preview.load();
 
     document.getElementById('preview-wrapper').classList.add('active');
     instruction.classList.add('visible');
@@ -456,44 +470,45 @@
   function onFileSelected(input) {
     if (input.files && input.files[0]) {
       selectedFile = input.files[0];
-      document.getElementById('file-name-display').textContent = '✓ ' + selectedFile.name;
+      document.getElementById('file-name-display').textContent = selectedFile.name;
       showPreview(selectedFile);
     }
   }
 
-  const zone = document.getElementById('upload-zone');
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-  zone.addEventListener('drop', e => {
+  var zone = document.getElementById('upload-zone');
+  zone.addEventListener('dragover', function(e) { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', function() { zone.classList.remove('drag-over'); });
+  zone.addEventListener('drop', function(e) {
     e.preventDefault();
     zone.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
+    var file = e.dataTransfer.files[0];
     if (file && file.type.startsWith('video/')) {
       selectedFile = file;
-      document.getElementById('file-name-display').textContent = '✓ ' + file.name;
+      document.getElementById('file-name-display').textContent = file.name;
       showPreview(file);
     }
   });
 
   function setState(name) {
-    ['idle','processing','result','error'].forEach(s => {
-      document.getElementById(`state-${s}`).style.display = s === name ? 'block' : 'none';
-    });
+    var states = ['idle', 'processing', 'result', 'error'];
+    for (var i = 0; i < states.length; i++) {
+      document.getElementById('state-' + states[i]).style.display = states[i] === name ? 'block' : 'none';
+    }
   }
 
-  const steps = [
+  var steps = [
     'Finding the skier...',
     'Tracking movement...',
     'Reading turns...',
     'Writing feedback...',
-    'Almost done...',
+    'Almost done...'
   ];
 
   function cycleSteps() {
-    let i = 0;
-    const el = document.getElementById('processing-step');
+    var i = 0;
+    var el = document.getElementById('processing-step');
     el.textContent = steps[0];
-    return setInterval(() => {
+    return setInterval(function() {
       i = Math.min(i + 1, steps.length - 1);
       el.textContent = steps[i];
     }, 8000);
@@ -502,19 +517,19 @@
   async function submitVideo() {
     if (!selectedFile) return;
     setState('processing');
-    const timer = cycleSteps();
+    var timer = cycleSteps();
     try {
-      const fd = new FormData();
+      var fd = new FormData();
       fd.append('video', selectedFile);
       if (clickData.x !== null) {
-        fd.append('click_x', clickData.x);
-        fd.append('click_y', clickData.y);
+        fd.append('click_x', clickData.x * preview.videoWidth);
+        fd.append('click_y', clickData.y * preview.videoHeight);
         fd.append('click_time', clickData.time);
       }
-      const res = await fetch(MODAL_URL, { method: 'POST', body: fd });
+      var res = await fetch(MODAL_URL, { method: 'POST', body: fd });
       clearInterval(timer);
-      if (!res.ok) throw new Error(`Server error ${res.status}`);
-      const data = await res.json();
+      if (!res.ok) throw new Error('Server error ' + res.status);
+      var data = await res.json();
       if (data.status === 'rejected') {
         document.getElementById('error-text').textContent =
           data.reasons ? data.reasons.join(' ') : 'Clip did not pass quality gate.';
@@ -538,7 +553,8 @@
     document.getElementById('submit-btn').disabled = true;
     document.getElementById('video-input').value = '';
     document.getElementById('preview-wrapper').classList.remove('active');
-    instruction.classList.remove('visible', 'done');
+    instruction.classList.remove('visible');
+    instruction.classList.remove('done');
     if (preview.src) URL.revokeObjectURL(preview.src);
     setState('idle');
   }
