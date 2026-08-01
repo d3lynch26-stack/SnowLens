@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SnowLens — Analyze</title>
+  <title>SnowLens -- Analyze</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
   <style>
@@ -331,7 +331,7 @@
   <div id="state-idle">
     <div class="title-block">
       <h1>Analyze<br>your <em>clip</em></h1>
-      <p>Film from behind the skier, close enough to see their whole body. 10-20 seconds with 3-5 turns works best. Avoid lift rides and flat sections.</p>
+      <p>Play the video, pause on a frame where the skier is clearly visible, then tap them. 10-20 seconds with 3-5 turns works best.</p>
     </div>
 
     <div class="upload-zone" id="upload-zone">
@@ -347,10 +347,10 @@
     </div>
 
     <div class="preview-wrapper" id="preview-wrapper">
-      <video id="video-preview" muted playsinline></video>
+      <video id="video-preview" muted playsinline controls></video>
       <div class="click-marker" id="click-marker"></div>
     </div>
-    <div class="preview-instruction" id="preview-instruction">Tap the skier you want analyzed</div>
+    <div class="preview-instruction" id="preview-instruction">Play the video, pause on your skier, then tap them</div>
 
     <div class="requirements">
       <p><strong>Requirements:</strong> Camera behind the rider - skiing or boarding only - clip at least 4 seconds - at least 2 turns</p>
@@ -409,9 +409,9 @@
   var instruction = document.getElementById('preview-instruction');
 
   preview.addEventListener('click', function(e) {
-    if (!preview.paused) preview.pause();
-
     var rect = preview.getBoundingClientRect();
+    var controlsHeight = 40;
+    if (e.clientY > rect.bottom - controlsHeight) return;
 
     var videoRatio = preview.videoWidth / preview.videoHeight;
     var elemRatio = rect.width / rect.height;
@@ -443,7 +443,7 @@
     marker.style.top = markerTopPct + '%';
     marker.classList.add('set');
 
-    instruction.textContent = 'Locked -- tap Analyze when ready';
+    instruction.textContent = 'Locked at ' + preview.currentTime.toFixed(1) + 's -- tap Analyze when ready';
     instruction.classList.add('done');
     document.getElementById('submit-btn').disabled = false;
   });
@@ -451,7 +451,7 @@
   function showPreview(file) {
     marker.classList.remove('set');
     instruction.classList.remove('done');
-    instruction.textContent = 'Tap the skier you want analyzed';
+    instruction.textContent = 'Play the video, pause on your skier, then tap them';
     clickData = { x: null, y: null, time: null };
 
     if (preview.src) URL.revokeObjectURL(preview.src);
