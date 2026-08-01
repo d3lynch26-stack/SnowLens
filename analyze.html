@@ -328,7 +328,6 @@
     <div class="badge">Early Test Build</div>
   </header>
 
-  <!-- IDLE -->
   <div id="state-idle">
     <div class="title-block">
       <h1>Analyze<br>your <em>clip</em></h1>
@@ -362,7 +361,6 @@
     </button>
   </div>
 
-  <!-- PROCESSING -->
   <div id="state-processing">
     <div class="processing-block">
       <div class="spinner"></div>
@@ -372,7 +370,6 @@
     </div>
   </div>
 
-  <!-- RESULT -->
   <div id="state-result">
     <div class="result-block">
       <div class="result-eyebrow">What actually happened</div>
@@ -385,7 +382,6 @@
     </div>
   </div>
 
-  <!-- ERROR -->
   <div id="state-error">
     <div class="error-card">
       <h3>Clip rejected</h3>
@@ -522,8 +518,8 @@
       var fd = new FormData();
       fd.append('video', selectedFile);
       if (clickData.x !== null) {
-        fd.append('click_x', clickData.x * preview.videoWidth);
-        fd.append('click_y', clickData.y * preview.videoHeight);
+        fd.append('click_x', clickData.x);
+        fd.append('click_y', clickData.y);
         fd.append('click_time', clickData.time);
       }
       var res = await fetch(MODAL_URL, { method: 'POST', body: fd });
