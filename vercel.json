@@ -1,5 +1,11 @@
 {
   "routes": [
-    { "src": "/analyze", "dest": "/analyze.html" }
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/analyze",
+      "dest": "/analyze.html"
+    }
   ]
 }
