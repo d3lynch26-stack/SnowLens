@@ -19,7 +19,7 @@ document.querySelectorAll('form').forEach(form => {
       status.textContent = 'Thank you — your signup was received. We’ll email you with pilot updates; no access date is set.';
       form.reset(); label.textContent = 'Joined';
     } catch (error) {
-      status.textContent = error.name === 'AbortError' ? 'We couldn’t confirm receipt in time. Please try again or email donald@getsnowlens.com.' : 'We couldn’t confirm your signup. Please try again or email donald@getsnowlens.com.';
+      status.textContent = error.name === 'AbortError' ? 'We couldn’t confirm receipt in time. Please try again or email hello@getsnowlens.com.' : 'We couldn’t confirm your signup. Please try again or email hello@getsnowlens.com.';
       label.textContent = 'Try again'; button.disabled = false;
     } finally { clearTimeout(timeout); }
   });
