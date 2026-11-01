@@ -1,11 +1,57 @@
 {
-  "routes": [
+  "redirects": [
     {
-      "handle": "filesystem"
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "getsnowlens.com"
+        }
+      ],
+      "destination": "https://www.getsnowlens.com/:path*",
+      "permanent": true
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/analyze",
+      "destination": "/analyze.html"
     },
     {
-      "src": "/analyze",
-      "dest": "/analyze.html"
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
+      "source": "/terms",
+      "destination": "/terms.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/analyze",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    },
+    {
+      "source": "/analyze.html",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
     }
   ]
 }
